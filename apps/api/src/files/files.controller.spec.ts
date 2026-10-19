@@ -1,7 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
+
+import { PrismaService } from '../prisma/prisma.service.js';
 import { FilesController } from './files.controller.js';
 import { FilesService } from './files.service.js';
-import { PrismaService } from '../prisma/prisma.service.js';
 
 describe('FilesController', () => {
   let controller: FilesController;
