@@ -6,10 +6,12 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { create as createContentDisposition } from 'content-disposition';
 import { memoryStorage } from 'multer';
 
 import { ListFilesQueryDto } from './dto/list-files-query.dto.js';
@@ -47,6 +49,19 @@ export class FilesController {
   @Get()
   findAll(@Query() query: ListFilesQueryDto) {
     return this.filesService.findAll(query);
+  }
+
+  @Get(':id/download')
+  async download(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<StreamableFile> {
+    const file = await this.filesService.getDownload(id);
+
+    return new StreamableFile(file.stream, {
+      type: file.mimeType,
+      disposition: createContentDisposition(file.originalName),
+      length: Number(file.sizeBytes),
+    });
   }
 
   @Get(':id')

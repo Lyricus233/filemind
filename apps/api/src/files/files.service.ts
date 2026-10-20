@@ -61,6 +61,42 @@ export class FilesService {
     return this.toResponse(file);
   }
 
+  async getDownload(id: string) {
+    const file = await this.prisma.file.findUnique({
+      where: { id },
+    });
+
+    if (file === null) {
+      throw new NotFoundException('File not found');
+    }
+
+    if (file.storageKey === null) {
+      throw new NotFoundException('File content is unavailable');
+    }
+
+    try {
+      const stream = await this.storage.openReadStream(file.storageKey);
+
+      return {
+        originalName: file.originalName,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        stream,
+      };
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'ENOENT'
+      ) {
+        throw new NotFoundException('Stored file not found');
+      }
+
+      throw error;
+    }
+  }
+
   async findAll(query: ListFilesQueryDto) {
     const { page, limit } = query;
     const name = query.name?.trim();
