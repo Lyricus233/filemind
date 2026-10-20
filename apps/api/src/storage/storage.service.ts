@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ReadStream } from 'node:fs';
-import { mkdir, open, rm, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import { Injectable } from '@nestjs/common';
@@ -26,6 +26,10 @@ export class StorageService {
     });
 
     return storageKey;
+  }
+
+  async read(storageKey: string): Promise<Buffer> {
+    return readFile(join(this.directory, storageKey));
   }
 
   async remove(storageKey: string): Promise<void> {
