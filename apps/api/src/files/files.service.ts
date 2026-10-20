@@ -3,6 +3,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import type { File } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateFileDto } from './dto/create-file.dto.js';
+import { ListFilesQueryDto } from './dto/list-files-query.dto.js';
 
 @Injectable()
 export class FilesService {
@@ -20,14 +21,25 @@ export class FilesService {
     return this.toResponse(file);
   }
 
-  async findAll() {
-    const files = await this.prisma.file.findMany({
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+  async findAll(query: ListFilesQueryDto) {
+    const { page, limit } = query;
 
-    return files.map((file) => this.toResponse(file));
+    const [files, total] = await Promise.all([
+      this.prisma.file.findMany({
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      }),
+      this.prisma.file.count(),
+    ]);
+
+    return {
+      items: files.map((file) => this.toResponse(file)),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   async findOne(id: string) {

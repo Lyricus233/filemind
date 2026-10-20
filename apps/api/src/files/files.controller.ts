@@ -5,9 +5,11 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
 } from '@nestjs/common';
 
 import { CreateFileDto } from './dto/create-file.dto.js';
+import { ListFilesQueryDto } from './dto/list-files-query.dto.js';
 import { FilesService } from './files.service.js';
 
 @Controller('files')
@@ -20,8 +22,8 @@ export class FilesController {
   }
 
   @Get()
-  findAll() {
-    return this.filesService.findAll();
+  findAll(@Query() query: ListFilesQueryDto) {
+    return this.filesService.findAll(query);
   }
 
   @Get(':id')
