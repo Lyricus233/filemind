@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { PrismaService } from '../prisma/prisma.service.js';
+import { StorageService } from '../storage/storage.service.js';
 import { FilesController } from './files.controller.js';
 import { FilesService } from './files.service.js';
 
@@ -18,6 +19,13 @@ describe('FilesController', () => {
             file: {
               findMany: vi.fn().mockResolvedValue([]),
             },
+          },
+        },
+        {
+          provide: StorageService,
+          useValue: {
+            save: vi.fn(),
+            remove: vi.fn(),
           },
         },
       ],

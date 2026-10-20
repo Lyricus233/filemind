@@ -17,6 +17,7 @@ model File {
   originalName String
   mimeType     String
   sizeBytes    BigInt
+  storageKey   String?  @unique
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

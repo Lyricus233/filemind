@@ -1,22 +1,62 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 
 import type { File, Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { CreateFileDto } from './dto/create-file.dto.js';
+import { StorageService } from '../storage/storage.service.js';
 import { ListFilesQueryDto } from './dto/list-files-query.dto.js';
 
 @Injectable()
 export class FilesService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(FilesService.name);
 
-  async create(createFileDto: CreateFileDto) {
-    const file = await this.prisma.file.create({
-      data: {
-        originalName: createFileDto.originalName,
-        mimeType: createFileDto.mimeType,
-        sizeBytes: BigInt(createFileDto.sizeBytes),
-      },
-    });
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
+
+  async upload(input: {
+    originalName: string;
+    mimeType: string;
+    buffer: Buffer;
+  }) {
+    const originalName = input.originalName.trim();
+
+    if (originalName.length === 0 || originalName.length > 255) {
+      throw new BadRequestException(
+        'Filename must contain between 1 and 255 characters',
+      );
+    }
+
+    const storageKey = await this.storage.save(input.buffer);
+
+    let file: File;
+
+    try {
+      file = await this.prisma.file.create({
+        data: {
+          originalName,
+          mimeType: input.mimeType,
+          sizeBytes: BigInt(input.buffer.byteLength),
+          storageKey,
+        },
+      });
+    } catch (error) {
+      try {
+        await this.storage.remove(storageKey);
+      } catch (cleanupError) {
+        this.logger.error(
+          `Failed to clean up uploaded file: ${storageKey}`,
+          cleanupError,
+        );
+      }
+
+      throw error;
+    }
 
     return this.toResponse(file);
   }
