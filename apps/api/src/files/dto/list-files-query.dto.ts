@@ -1,5 +1,12 @@
 import { Type } from 'class-transformer';
-import { IsInt, Max, Min } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class ListFilesQueryDto {
   @Type(() => Number)
@@ -13,4 +20,9 @@ export class ListFilesQueryDto {
   @Min(1)
   @Max(100)
   limit: number = 20;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  name?: string;
 }
