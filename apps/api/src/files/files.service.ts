@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 
 import type { File } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -28,6 +28,20 @@ export class FilesService {
     });
 
     return files.map((file) => this.toResponse(file));
+  }
+
+  async findOne(id: string) {
+    const file = await this.prisma.file.findUnique({
+      where: {
+        id,
+      },
+    });
+
+    if (file === null) {
+      throw new NotFoundException('File not found');
+    }
+
+    return this.toResponse(file);
   }
 
   private toResponse(file: File) {
