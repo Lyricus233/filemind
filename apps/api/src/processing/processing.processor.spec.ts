@@ -75,9 +75,15 @@ describe('ProcessingProcessor', () => {
   );
 
   it('rejects an unsupported job name', async () => {
-    await expect(
-      processor.process({ ...job, name: 'unknown' } as typeof job),
-    ).rejects.toBeInstanceOf(UnrecoverableError);
+    const unknownJob = {
+      id: job.id,
+      name: 'unknown',
+      data: { fileId },
+    } as typeof job;
+
+    await expect(processor.process(unknownJob)).rejects.toBeInstanceOf(
+      UnrecoverableError,
+    );
     expect(processing.process).not.toHaveBeenCalled();
   });
 });
