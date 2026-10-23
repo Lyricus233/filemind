@@ -6,6 +6,7 @@ import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { FilesModule } from './files/files.module.js';
 import { ProcessingModule } from './processing/processing.module.js';
+import { SearchModule } from './search/search.module.js';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -23,6 +24,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     }),
     FilesModule,
     ProcessingModule,
+    SearchModule,
   ],
   controllers: [AppController],
   providers: [AppService],
