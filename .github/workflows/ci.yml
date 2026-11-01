@@ -45,12 +45,12 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: '12.14.0'
+          version: "12.14.0"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: "24"
           cache: pnpm
           cache-dependency-path: apps/api/pnpm-lock.yaml
 
@@ -62,3 +62,65 @@ jobs:
 
       - name: Run checks
         run: ${{ matrix.command }}
+  integration:
+    name: API / integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: filemind
+          POSTGRES_PASSWORD: filemind_test
+          POSTGRES_DB: filemind_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U filemind -d filemind_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://filemind:filemind_test@127.0.0.1:5432/filemind_test?schema=public
+      E2E_DATABASE_URL: postgresql://filemind:filemind_test@127.0.0.1:5432/filemind_test?schema=public
+      E2E_REDIS_HOST: 127.0.0.1
+      E2E_REDIS_PORT: "6379"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: "12.14.0"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: apps/api/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm exec prisma generate
+
+      - name: Apply test database migrations
+        run: pnpm exec prisma migrate deploy
+
+      - name: Test the file retrieval pipeline
+        run: pnpm run test:e2e

@@ -8,6 +8,7 @@
   "type": "module",
   "scripts": {
     "build": "nest build",
+    "embeddings:check": "node dist/embeddings/check.js",
     "deploy": "nest deploy",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -40,6 +41,7 @@
     "content-disposition": "^3.0.0",
     "ioredis": "^6.0.0",
     "multer": "^2.4.0",
+    "openai": "^7.45.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
