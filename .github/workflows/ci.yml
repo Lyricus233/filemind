@@ -124,3 +124,50 @@ jobs:
 
       - name: Test the file retrieval pipeline
         run: pnpm run test:e2e
+
+  vectors:
+    name: API / vector integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: "12.14.0"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: apps/api/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start Milvus
+        working-directory: .
+        env:
+          POSTGRES_PASSWORD: unused_by_vector_tests
+        run: docker compose --profile vectors up -d --wait --wait-timeout 240 milvus
+
+      - name: Test vector storage operations
+        run: pnpm run test:vectors
+
+      - name: Show Milvus logs on failure
+        if: failure()
+        working-directory: .
+        env:
+          POSTGRES_PASSWORD: unused_by_vector_tests
+        run: docker compose --profile vectors logs --no-color --tail 100 milvus milvus-etcd milvus-minio
+
+      - name: Stop vector services
+        if: always()
+        working-directory: .
+        env:
+          POSTGRES_PASSWORD: unused_by_vector_tests
+        run: docker compose --profile vectors down
