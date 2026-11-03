@@ -66,7 +66,10 @@ describe('SearchService', () => {
     await service.search(query());
     const listArguments = prisma.fileChunk.findMany.mock.calls[0][0];
     const countArguments = prisma.fileChunk.count.mock.calls[0][0];
-    expect(listArguments.where).toEqual({ content: { contains: '向量' } });
+    expect(listArguments.where).toEqual({
+      content: { contains: '向量' },
+      file: { deletedAt: null },
+    });
     expect(listArguments.where).toBe(countArguments.where);
     expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Array), {
       isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
@@ -95,11 +98,19 @@ describe('SearchService', () => {
     await service.search(query({ fileId }));
     expect(prisma.fileChunk.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { content: { contains: '向量' }, fileId },
+        where: {
+          content: { contains: '向量' },
+          fileId,
+          file: { deletedAt: null },
+        },
       }),
     );
     expect(prisma.fileChunk.count).toHaveBeenCalledWith({
-      where: { content: { contains: '向量' }, fileId },
+      where: {
+        content: { contains: '向量' },
+        fileId,
+        file: { deletedAt: null },
+      },
     });
   });
 
@@ -109,7 +120,9 @@ describe('SearchService', () => {
     ]);
     const result = await service.search(query({ q: '%' }));
     expect(prisma.fileChunk.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { content: { contains: '\\%' } } }),
+      expect.objectContaining({
+        where: { content: { contains: '\\%' }, file: { deletedAt: null } },
+      }),
     );
     expect(result.query).toBe('%');
     expect(result.items[0].matches).toEqual([{ start: 3, end: 4 }]);

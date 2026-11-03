@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { getQueueToken, getSharedConfigToken } from '@nestjs/bullmq';
-import type { INestApplication } from '@nestjs/common';
+import { type INestApplication, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { MilvusClient } from '@zilliz/milvus2-sdk-node';
@@ -46,6 +46,7 @@ describe('File retrieval pipeline (e2e)', () => {
   const prefix = `filemind-e2e-${randomUUID()}`;
   const fileIds: string[] = [];
   const collection = `filemind_pipeline_${randomUUID().replaceAll('-', '')}`;
+  const ownedCollections = new Set<string>();
   const realVectors = process.env.FILEMIND_E2E_VECTORS === 'real';
   const realEmbeddings = process.env.FILEMIND_E2E_EMBEDDINGS === 'real';
   const fakeVectors = new FixtureVectorStore(collection);
@@ -100,6 +101,7 @@ describe('File retrieval pipeline (e2e)', () => {
       assertMilvusSuccess(existing.status);
       expect(existing.value).toBe(false);
       ownsCollection = true;
+      ownedCollections.add(collection);
     }
 
     const apiBuilder = Test.createTestingModule({ imports: [AppModule] })
@@ -164,21 +166,19 @@ describe('File retrieval pipeline (e2e)', () => {
     } finally {
       await app?.close();
       try {
-        if (
-          cleanupClient &&
-          ownsCollection &&
-          /^filemind_pipeline_[0-9a-f]{32}$/u.test(collection)
-        ) {
-          const exists = await cleanupClient.hasCollection({
-            collection_name: collection,
-          });
-          assertMilvusSuccess(exists.status);
-          if (exists.value)
-            assertMilvusSuccess(
-              await cleanupClient.dropCollection({
-                collection_name: collection,
-              }),
-            );
+        if (cleanupClient && ownsCollection) {
+          for (const owned of ownedCollections) {
+            if (!/^filemind_(?:pipeline|history)_[0-9a-f]{32}$/u.test(owned))
+              continue;
+            const exists = await cleanupClient.hasCollection({
+              collection_name: owned,
+            });
+            assertMilvusSuccess(exists.status);
+            if (exists.value)
+              assertMilvusSuccess(
+                await cleanupClient.dropCollection({ collection_name: owned }),
+              );
+          }
         }
       } finally {
         await cleanupClient?.closeConnection();
@@ -449,4 +449,282 @@ describe('File retrieval pipeline (e2e)', () => {
       .expect(200);
     expect(chunks.body.total).toBe(0);
   }, 15000);
+
+  it('deletes original content, chunks and current/historical vectors, and can be repeated', async () => {
+    const file = await upload(
+      Buffer.from('Temporary content for deletion verification.'),
+      'delete-me.txt',
+    );
+    const job = await processFile(file.id);
+    expect(job.state).toBe('completed');
+    const record = await prisma!.file.findUniqueOrThrow({
+      where: { id: file.id },
+      select: { storageKey: true },
+    });
+    const oldCollection = `filemind_history_${randomUUID().replaceAll('-', '')}`;
+    let historical: VectorStoreService | undefined;
+    try {
+      if (realVectors) {
+        const existing = await cleanupClient!.hasCollection({
+          collection_name: oldCollection,
+        });
+        assertMilvusSuccess(existing.status);
+        expect(existing.value).toBe(false);
+        ownedCollections.add(oldCollection);
+        const config = app!.get(ConfigService);
+        historical = new VectorStoreService(
+          new ConfigService({
+            MILVUS_ADDRESS: config.get<string>('MILVUS_ADDRESS'),
+            MILVUS_TOKEN: config.get<string>('MILVUS_TOKEN'),
+            MILVUS_COLLECTION: oldCollection,
+            EMBEDDING_MODEL: 'historical-test-model',
+            EMBEDDING_DIMENSIONS: '5',
+          }),
+        );
+        await historical.upsert([
+          {
+            chunkId: randomUUID(),
+            fileId: file.id,
+            index: 0,
+            vector: [1, 0, 0, 0, 0],
+          },
+        ]);
+      }
+      await prisma!.fileVectorIndex.create({
+        data: { fileId: file.id, collection: oldCollection },
+      });
+      await request(app!.getHttpServer())
+        .delete(`/files/${file.id}`)
+        .expect(204);
+      expect(
+        await prisma!.file.findUnique({ where: { id: file.id } }),
+      ).toBeNull();
+      expect(
+        await prisma!.fileChunk.count({ where: { fileId: file.id } }),
+      ).toBe(0);
+      expect(
+        await prisma!.fileVectorIndex.count({ where: { fileId: file.id } }),
+      ).toBe(0);
+      await expect(
+        app!.get(StorageService).read(record.storageKey!),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+      const dimensions = Number(
+        app!.get(ConfigService).get('EMBEDDING_DIMENSIONS'),
+      );
+      const probe = Array.from({ length: dimensions }, (_, index) =>
+        index === 0 ? 1 : 0,
+      );
+      expect(
+        await app!.get(VectorStoreService).search(probe, { fileId: file.id }),
+      ).toEqual([]);
+      if (historical)
+        expect(
+          await historical.search([1, 0, 0, 0, 0], { fileId: file.id }),
+        ).toEqual([]);
+      for (const path of [
+        `/files/${file.id}`,
+        `/files/${file.id}/download`,
+        `/files/${file.id}/chunks`,
+        `/files/${file.id}/processing-jobs/${job.jobId}`,
+      ]) {
+        await request(app!.getHttpServer()).get(path).expect(404);
+      }
+      await request(app!.getHttpServer())
+        .post(`/files/${file.id}/process`)
+        .expect(404);
+      const literal = await request(app!.getHttpServer())
+        .get('/search')
+        .query({ q: 'Temporary', fileId: file.id })
+        .expect(200);
+      expect(literal.body.items).toEqual([]);
+      const semantic = await request(app!.getHttpServer())
+        .get('/search/semantic')
+        .query({ q: 'Temporary', fileId: file.id })
+        .expect(200);
+      expect(semantic.body.items).toEqual([]);
+      await request(app!.getHttpServer())
+        .delete(`/files/${file.id}`)
+        .expect(204);
+    } finally {
+      await historical?.onModuleDestroy();
+    }
+  }, 120000);
+
+  it('hides incomplete deletions and completes them on a repeated DELETE', async () => {
+    const file = await upload(
+      Buffer.from('Deletion recovery test.'),
+      'delete-retry.txt',
+    );
+    const storage = app!.get(StorageService);
+    const failureLog = vi
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const remove = vi
+      .spyOn(storage, 'remove')
+      .mockRejectedValueOnce(new Error('Injected disk failure'));
+    try {
+      await request(app!.getHttpServer())
+        .delete(`/files/${file.id}`)
+        .expect(503);
+      expect(failureLog).toHaveBeenCalledWith(
+        `File deletion failed for ${file.id}`,
+        expect.stringContaining('Injected disk failure'),
+      );
+      const record = await prisma!.file.findUniqueOrThrow({
+        where: { id: file.id },
+      });
+      expect(record.deletedAt).toBeInstanceOf(Date);
+      expect(await storage.read(record.storageKey!)).toEqual(
+        Buffer.from('Deletion recovery test.'),
+      );
+      await request(app!.getHttpServer()).get(`/files/${file.id}`).expect(404);
+      await request(app!.getHttpServer())
+        .get(`/files/${file.id}/download`)
+        .expect(404);
+      await request(app!.getHttpServer())
+        .get(`/files/${file.id}/chunks`)
+        .expect(404);
+      await request(app!.getHttpServer())
+        .post(`/files/${file.id}/process`)
+        .expect(404);
+      const list = await request(app!.getHttpServer())
+        .get('/files')
+        .expect(200);
+      expect(
+        list.body.items.some((item: { id: string }) => item.id === file.id),
+      ).toBe(false);
+      await request(app!.getHttpServer())
+        .delete(`/files/${file.id}`)
+        .expect(204);
+      expect(
+        await prisma!.file.findUnique({ where: { id: file.id } }),
+      ).toBeNull();
+      await expect(storage.read(record.storageKey!)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    } finally {
+      remove.mockRestore();
+      failureLog.mockRestore();
+    }
+  }, 30000);
+
+  it('rejects deletion while a worker writes vectors and succeeds after indexing finishes', async () => {
+    const file = await upload(
+      Buffer.from('Concurrent indexing and deletion verification.'),
+      'delete-active.txt',
+    );
+    let release: () => void = () => undefined;
+    let entered: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const writing = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const store = worker!.get(VectorStoreService);
+    const original = store.upsert.bind(store);
+    const upsert = vi
+      .spyOn(store, 'upsert')
+      .mockImplementationOnce(async (rows) => {
+        entered();
+        await gate;
+        return original(rows);
+      });
+    const processing = processFile(file.id);
+    try {
+      await Promise.race([
+        writing,
+        processing.then(() => {
+          throw new Error('Worker finished before the write gate');
+        }),
+      ]);
+      await request(app!.getHttpServer())
+        .delete(`/files/${file.id}`)
+        .expect(409);
+      const untouched = await prisma!.file.findUniqueOrThrow({
+        where: { id: file.id },
+      });
+      expect(untouched.deletedAt).toBeNull();
+      expect(untouched.indexStatus).toBe('PROCESSING');
+      release();
+      expect((await processing).state).toBe('completed');
+      await request(app!.getHttpServer())
+        .delete(`/files/${file.id}`)
+        .expect(204);
+    } finally {
+      release();
+      await processing.catch(() => undefined);
+      upsert.mockRestore();
+    }
+  }, 120000);
+
+  it.runIf(!realEmbeddings)(
+    'does not recreate a file deleted while its model request was in flight',
+    async () => {
+      const file = await upload(
+        Buffer.from('Deletion during an in-flight embedding request.'),
+        'delete-preflight.txt',
+      );
+      let release: () => void = () => undefined;
+      let entered: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const embedding = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      embeddingStub.embed.mockImplementationOnce(async (texts) => {
+        entered();
+        await gate;
+        return {
+          model: FIXTURE_MODEL,
+          dimensions: 3,
+          vectors: texts.map(() => [1, 0, 0]),
+        };
+      });
+      const queued = await request(app!.getHttpServer())
+        .post(`/files/${file.id}/process`)
+        .expect(202);
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          embedding,
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(
+              () =>
+                reject(new Error('Worker did not reach the embedding gate')),
+              10000,
+            );
+          }),
+        ]);
+        await request(app!.getHttpServer())
+          .delete(`/files/${file.id}`)
+          .expect(204);
+      } finally {
+        clearTimeout(timeout);
+        release();
+      }
+      const deadline = Date.now() + 10000;
+      let state: string | undefined;
+      while (Date.now() < deadline) {
+        const job = await queue!.getJob(queued.body.jobId as string);
+        state = await job?.getState();
+        if (state === 'failed' || state === 'completed') break;
+        await delay(50);
+      }
+      expect(state).toBe('failed');
+      expect(
+        await prisma!.file.findUnique({ where: { id: file.id } }),
+      ).toBeNull();
+      expect(
+        await prisma!.fileChunk.count({ where: { fileId: file.id } }),
+      ).toBe(0);
+      expect(
+        await app!
+          .get(VectorStoreService)
+          .search([1, 0, 0], { fileId: file.id }),
+      ).toEqual([]);
+    },
+    30000,
+  );
 });

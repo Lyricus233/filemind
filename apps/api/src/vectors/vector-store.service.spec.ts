@@ -353,6 +353,46 @@ describe('VectorStoreService', () => {
     });
   });
 
+  it('cleans a historical collection without requiring the current embedding model', async () => {
+    sdk.client.hasCollection.mockResolvedValue({
+      status: success,
+      value: true,
+    });
+    const instance = new VectorStoreService(new ConfigService());
+    instances.push(instance);
+    await instance.deleteFromCollection(fileId, 'historical_index');
+    expect(sdk.client.delete).toHaveBeenCalledWith({
+      collection_name: 'historical_index',
+      filter: `file_id == "${fileId}"`,
+    });
+    expect(sdk.client.createCollection).not.toHaveBeenCalled();
+    expect(sdk.client.describeCollection).not.toHaveBeenCalled();
+    expect(sdk.client.createIndex).not.toHaveBeenCalled();
+    expect(sdk.client.closeConnection).toHaveBeenCalledOnce();
+  });
+
+  it('does not recreate a missing collection during deletion', async () => {
+    await service().deleteFromCollection(fileId, 'removed_index');
+    expect(sdk.client.loadCollection).not.toHaveBeenCalled();
+    expect(sdk.client.delete).not.toHaveBeenCalled();
+    expect(sdk.client.createCollection).not.toHaveBeenCalled();
+    expect(sdk.client.closeConnection).toHaveBeenCalledOnce();
+  });
+
+  it('closes historical collection connections on a cleanup failure', async () => {
+    sdk.client.hasCollection.mockResolvedValue({
+      status: success,
+      value: true,
+    });
+    sdk.client.delete.mockRejectedValue(
+      new Error('private connection details'),
+    );
+    await expect(
+      service().deleteFromCollection(fileId, 'historical_index'),
+    ).rejects.toMatchObject({ code: 'unavailable' });
+    expect(sdk.client.closeConnection).toHaveBeenCalledOnce();
+  });
+
   it('excludes in-progress files in the server-side search filter', async () => {
     await service().search([1, 0, 0], {
       fileId,

@@ -20,6 +20,9 @@ export class FixtureVectorStore {
     for (const [id, row] of this.rows)
       if (row.fileId === fileId) this.rows.delete(id);
   }
+  async deleteFromCollection(fileId: string, collection: string) {
+    if (collection === this.collection) await this.deleteByFile(fileId);
+  }
   async search(
     vector: readonly number[],
     options: {

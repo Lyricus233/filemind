@@ -20,21 +20,34 @@ enum IndexStatus {
 }
 
 model File {
-  id               String      @id @default(uuid()) @db.Uuid
+  id               String       @id @default(uuid()) @db.Uuid
   originalName     String
   mimeType         String
   sizeBytes        BigInt
-  storageKey       String?     @unique
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
+  storageKey       String?      @unique
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
   chunks           FileChunk[]
-  indexStatus      IndexStatus @default(PENDING)
-  indexJobId       String?     @db.Uuid
+  indexStatus      IndexStatus  @default(PENDING)
+  indexJobId       String?      @db.Uuid
   vectorCollection String?
   indexedAt        DateTime?
+  deletedAt        DateTime?
+  vectorIndexes    FileVectorIndex[]
 
   @@index([vectorCollection, indexStatus])
+  @@index([deletedAt])
   @@map("files")
+}
+
+model FileVectorIndex {
+  fileId     String   @db.Uuid
+  collection String
+  createdAt  DateTime @default(now())
+  file       File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@id([fileId, collection])
+  @@map("file_vector_indexes")
 }
 
 model FileChunk {

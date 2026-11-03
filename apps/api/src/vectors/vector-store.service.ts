@@ -3,7 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { DataType, MetricType, MilvusClient } from '@zilliz/milvus2-sdk-node';
 
 import { VectorStoreError, assertMilvusSuccess } from './vector-store-error.js';
-import { vectorStoreConfig } from './vector-store.config.js';
+import {
+  assertCollectionName,
+  milvusClientConfig,
+  vectorStoreConfig,
+} from './vector-store.config.js';
 
 export interface ChunkVector {
   chunkId: string;
@@ -185,6 +189,32 @@ export class VectorStoreService implements OnModuleDestroy {
     this.client = undefined;
   }
 
+  async deleteFromCollection(fileId: string, collection: string) {
+    this.validateId(fileId);
+    assertCollectionName(collection);
+    if (this.closed)
+      throw new VectorStoreError('Vector store has been closed', 'unavailable');
+    await this.operation(async () => {
+      const client = new MilvusClient(milvusClientConfig(this.config));
+      try {
+        await client.connectPromise;
+        const exists = await client.hasCollection({
+          collection_name: collection,
+        });
+        assertMilvusSuccess(exists.status);
+        if (!exists.value) return;
+        await this.load(client, collection);
+        const result = await client.delete({
+          collection_name: collection,
+          filter: `file_id == ${JSON.stringify(fileId)}`,
+        });
+        assertMilvusSuccess(result.status);
+      } finally {
+        await client.closeConnection();
+      }
+    });
+  }
+
   private readSettings() {
     return (this.settings ??= vectorStoreConfig(this.config));
   }
@@ -307,29 +337,7 @@ export class VectorStoreService implements OnModuleDestroy {
           params: { M: 16, efConstruction: 128 },
         }),
       );
-      // The SDK polls loading progress without an overall deadline.
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        const loaded = await Promise.race([
-          client.loadCollection(request),
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(
-              () =>
-                reject(
-                  new VectorStoreError(
-                    'Milvus collection loading timed out',
-                    'timeout',
-                    true,
-                  ),
-                ),
-              30000,
-            );
-          }),
-        ]);
-        assertMilvusSuccess(loaded);
-      } finally {
-        clearTimeout(timer);
-      }
+      await this.load(client, settings.collection);
       return client;
     } catch (error) {
       await client.closeConnection().catch(() => undefined);
@@ -344,6 +352,31 @@ export class VectorStoreService implements OnModuleDestroy {
         'Vector IDs must be lowercase UUIDs',
         'invalid_input',
       );
+    }
+  }
+
+  private async load(client: MilvusClient, collection: string) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const loaded = await Promise.race([
+        client.loadCollection({ collection_name: collection }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                new VectorStoreError(
+                  'Milvus collection loading timed out',
+                  'timeout',
+                  true,
+                ),
+              ),
+            30000,
+          );
+        }),
+      ]);
+      assertMilvusSuccess(loaded);
+    } finally {
+      clearTimeout(timer);
     }
   }
 

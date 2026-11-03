@@ -74,13 +74,19 @@ describe('ProcessingJobsService', () => {
         storageKey: 'blob-key',
         indexStatus: 'PROCESSING',
         indexJobId: jobId,
+        deletedAt: null,
       });
       queue.getJob.mockResolvedValue(
         state ? { getState: vi.fn().mockResolvedValue(state) } : undefined,
       );
       await service.enqueue(fileId);
       expect(prisma.file.updateMany).toHaveBeenCalledWith({
-        where: { id: fileId, indexStatus: 'PROCESSING', indexJobId: jobId },
+        where: {
+          id: fileId,
+          indexStatus: 'PROCESSING',
+          indexJobId: jobId,
+          deletedAt: null,
+        },
         data: { indexStatus: 'FAILED' },
       });
     },

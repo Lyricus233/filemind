@@ -47,10 +47,11 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
         storageKey: true,
         indexStatus: true,
         indexJobId: true,
+        deletedAt: true,
       },
     });
 
-    if (file === null) {
+    if (file === null || file.deletedAt) {
       throw new NotFoundException('File not found');
     }
     fileId = file.id;
@@ -59,29 +60,7 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException('File content is unavailable');
     }
 
-    if (file.indexStatus === IndexStatus.PROCESSING && file.indexJobId) {
-      const previous = await this.withQueue(() =>
-        this.queue.getJob(file.indexJobId!),
-      );
-      const state = previous
-        ? await this.withQueue(() => previous.getState())
-        : undefined;
-      if (
-        state === undefined ||
-        state === 'unknown' ||
-        state === 'failed' ||
-        state === 'completed'
-      ) {
-        await this.prisma.file.updateMany({
-          where: {
-            id: file.id,
-            indexStatus: IndexStatus.PROCESSING,
-            indexJobId: file.indexJobId,
-          },
-          data: { indexStatus: IndexStatus.FAILED },
-        });
-      }
-    }
+    await this.releaseAbandoned(file);
 
     const job = await this.withQueue(() =>
       this.queue.add(
@@ -103,7 +82,6 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
         'Processing queue returned no job ID',
       );
     }
-
     return {
       fileId,
       jobId: job.id,
@@ -111,7 +89,44 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  async releaseAbandoned(file: {
+    id: string;
+    indexStatus: IndexStatus;
+    indexJobId: string | null;
+  }) {
+    if (file.indexStatus === IndexStatus.PROCESSING && file.indexJobId) {
+      const previous = await this.withQueue(() =>
+        this.queue.getJob(file.indexJobId!),
+      );
+      const state = previous
+        ? await this.withQueue(() => previous.getState())
+        : undefined;
+      if (
+        state === undefined ||
+        state === 'unknown' ||
+        state === 'failed' ||
+        state === 'completed'
+      ) {
+        await this.prisma.file.updateMany({
+          where: {
+            id: file.id,
+            indexStatus: IndexStatus.PROCESSING,
+            indexJobId: file.indexJobId,
+            deletedAt: null,
+          },
+          data: { indexStatus: IndexStatus.FAILED },
+        });
+      }
+    }
+  }
+
   async findOne(fileId: string, jobId: string) {
+    const file = await this.prisma.file.findUnique({
+      where: { id: fileId },
+      select: { id: true, deletedAt: true },
+    });
+    if (!file || file.deletedAt) throw new NotFoundException('File not found');
+    fileId = file.id;
     const initialJob = await this.withQueue(() => this.queue.getJob(jobId));
 
     if (initialJob === undefined || initialJob.data.fileId !== fileId) {

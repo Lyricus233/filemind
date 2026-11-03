@@ -106,6 +106,13 @@ describe('FilesService', () => {
     expect(prisma.file.create).not.toHaveBeenCalled();
   });
 
+  it('hides a file whose deletion is incomplete from metadata requests', async () => {
+    prisma.file.findUnique.mockResolvedValue({ deletedAt: new Date() });
+    await expect(
+      service.findOne('11111111-1111-4111-8111-111111111111'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
   describe('getDownload', () => {
     const file = {
       id: 'e71d88f0-9b85-48bc-8cac-c9b28ac19a2f',
@@ -144,6 +151,17 @@ describe('FilesService', () => {
         NotFoundException,
       );
 
+      expect(storage.openReadStream).not.toHaveBeenCalled();
+    });
+
+    it('does not open content for a file marked for deletion', async () => {
+      prisma.file.findUnique.mockResolvedValue({
+        ...file,
+        deletedAt: new Date(),
+      });
+      await expect(service.getDownload(file.id)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
       expect(storage.openReadStream).not.toHaveBeenCalled();
     });
 

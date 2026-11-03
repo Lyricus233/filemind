@@ -24,6 +24,7 @@ describe('ProcessingService', () => {
 
   const transaction = {
     file: { updateMany: vi.fn() },
+    fileVectorIndex: { createMany: vi.fn() },
     fileChunk: {
       findMany: vi.fn(),
       deleteMany: vi.fn(),
@@ -55,6 +56,7 @@ describe('ProcessingService', () => {
     storage.read.mockResolvedValue(Buffer.from('hello'));
     prisma.file.updateMany.mockResolvedValue({ count: 1 });
     transaction.file.updateMany.mockResolvedValue({ count: 1 });
+    transaction.fileVectorIndex.createMany.mockResolvedValue({ count: 1 });
     transaction.fileChunk.findMany.mockResolvedValue([]);
     vectors.ensureCollection.mockResolvedValue(target);
     vectors.deleteByFile.mockResolvedValue(undefined);
@@ -146,7 +148,7 @@ describe('ProcessingService', () => {
     expect(vectors.deleteByFile).not.toHaveBeenCalled();
     expect(prisma.file.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: file.id, indexStatus: 'PENDING' },
+        where: { id: file.id, indexStatus: 'PENDING', deletedAt: null },
       }),
     );
   });

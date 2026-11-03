@@ -20,6 +20,7 @@ export class SemanticSearchService {
     try {
       const target = await this.vectors.ensureCollection();
       const ready = {
+        deletedAt: null,
         indexStatus: IndexStatus.READY,
         vectorCollection: target.collection,
       };

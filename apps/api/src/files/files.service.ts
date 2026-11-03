@@ -66,7 +66,7 @@ export class FilesService {
       where: { id },
     });
 
-    if (file === null) {
+    if (file === null || file.deletedAt) {
       throw new NotFoundException('File not found');
     }
 
@@ -101,14 +101,17 @@ export class FilesService {
     const { page, limit } = query;
     const name = query.name?.trim();
 
-    const where: Prisma.FileWhereInput = name
-      ? {
-          originalName: {
-            contains: name.replace(/[\\%_]/g, '\\$&'),
-            mode: 'insensitive',
-          },
-        }
-      : {};
+    const where: Prisma.FileWhereInput = {
+      deletedAt: null,
+      ...(name
+        ? {
+            originalName: {
+              contains: name.replace(/[\\%_]/g, '\\$&'),
+              mode: 'insensitive',
+            },
+          }
+        : {}),
+    };
 
     const [files, total] = await Promise.all([
       this.prisma.file.findMany({
@@ -136,7 +139,7 @@ export class FilesService {
       },
     });
 
-    if (file === null) {
+    if (file === null || file.deletedAt) {
       throw new NotFoundException('File not found');
     }
 

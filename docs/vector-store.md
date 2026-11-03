@@ -90,12 +90,12 @@ test. `pnpm test` runs unit tests without connecting to Milvus.
 
 ## Storage contract
 
-| Field | Type | Purpose |
-| --- | --- | --- |
-| `chunk_id` | VARCHAR(36), primary key | PostgreSQL chunk UUID |
-| `file_id` | VARCHAR(36) | File filter and file-scoped deletion |
-| `chunk_index` | INT32 | Chunk order within a file |
-| `embedding` | FLOAT_VECTOR | Dense embedding |
+| Field         | Type                     | Purpose                              |
+| ------------- | ------------------------ | ------------------------------------ |
+| `chunk_id`    | VARCHAR(36), primary key | PostgreSQL chunk UUID                |
+| `file_id`     | VARCHAR(36)              | File filter and file-scoped deletion |
+| `chunk_index` | INT32                    | Chunk order within a file            |
+| `embedding`   | FLOAT_VECTOR             | Dense embedding                      |
 
 The service lazily creates/validates the collection, builds an HNSW index using
 COSINE and loads it before operations. Parallel callers share initialization.
@@ -112,6 +112,10 @@ module lifecycle.
   and deletions visible to subsequent searches. Scores are not probabilities.
 - `deleteByFile(fileId)` removes vectors for one validated UUID. It does not delete
   PostgreSQL rows or files, and is safe to repeat.
+- `deleteFromCollection(fileId, collection)` removes a file's vectors from a tracked
+  collection without requiring the current embedding model/dimensions or creating
+  a missing collection. The file deletion API uses it to clean historical indexes;
+  see [File deletion and index cleanup](file-lifecycle.md).
 
 The collection description records the FileMind schema version, model and vector
 dimensions. A mismatch stops initialization. To change model or vector dimensions,

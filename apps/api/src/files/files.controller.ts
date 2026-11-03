@@ -1,6 +1,9 @@
 import {
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseFilePipe,
   ParseUUIDPipe,
@@ -15,13 +18,23 @@ import { create as createContentDisposition } from 'content-disposition';
 import { memoryStorage } from 'multer';
 
 import { ListFilesQueryDto } from './dto/list-files-query.dto.js';
+import { FileDeletionService } from './file-deletion.service.js';
 import { FilesService } from './files.service.js';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 @Controller('files')
 export class FilesController {
-  constructor(private readonly filesService: FilesService) {}
+  constructor(
+    private readonly filesService: FilesService,
+    private readonly deletion: FileDeletionService,
+  ) {}
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(@Param('id', ParseUUIDPipe) id: string) {
+    return this.deletion.remove(id);
+  }
 
   @Post()
   @UseInterceptors(

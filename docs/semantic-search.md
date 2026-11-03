@@ -65,11 +65,11 @@ The English query does not occur literally in the Chinese example. A multilingua
 embedding model can still retrieve the relevant passage. Retrieval quality depends
 on the model and source content.
 
-| Parameter | Meaning |
-| --- | --- |
-| `q` | Required query, trimmed, 1–1000 Unicode code points, no NUL characters |
-| `fileId` | Optional file UUID; restricts retrieval to this file |
-| `limit` | Maximum results, 1–100, default 20 |
+| Parameter | Meaning                                                                |
+| --------- | ---------------------------------------------------------------------- |
+| `q`       | Required query, trimmed, 1–1000 Unicode code points, no NUL characters |
+| `fileId`  | Optional file UUID; restricts retrieval to this file                   |
+| `limit`   | Maximum results, 1–100, default 20                                     |
 
 The response includes `mode: "semantic"`, model, dimensions, `metric: "COSINE"`,
 `limit`, `returned` and `items`. Each item contains a chunk ID, file metadata, chunk
@@ -88,12 +88,12 @@ A valid file UUID with no ready index returns an empty result.
 
 `GET /files/:id` and the file list now expose `indexStatus` and `indexedAt`:
 
-| Status | Meaning |
-| --- | --- |
-| `PENDING` | No index has been published, including files predating this migration |
-| `PROCESSING` | Source chunks are saved and vector replacement is in progress |
-| `READY` | Every vector write completed and the file can be searched semantically |
-| `FAILED` | Indexing needs a retry or a configuration/input correction |
+| Status       | Meaning                                                                |
+| ------------ | ---------------------------------------------------------------------- |
+| `PENDING`    | No index has been published, including files predating this migration  |
+| `PROCESSING` | Source chunks are saved and vector replacement is in progress          |
+| `READY`      | Every vector write completed and the file can be searched semantically |
+| `FAILED`     | Indexing needs a retry or a configuration/input correction             |
 
 The database also records the current collection and owning BullMQ job. These are
 internal coordination fields. A serializable transaction claims the file and saves
@@ -115,13 +115,17 @@ replacement preserves an already-ready index.
 Existing files need an explicit processing request after applying the migration.
 Changing the model/embedding space requires a new collection and reindexing files.
 
+`DELETE /files/:id` removes the file, its chunks and vectors from all tracked
+collections. Files pending physical cleanup are hidden from retrieval. See
+[File deletion and index cleanup](file-lifecycle.md) for retry and concurrency behavior.
+
 ## Test boundaries
 
-| Command | Dependencies and coverage |
-| --- | --- |
-| `pnpm test` | Unit tests; no external services |
-| `pnpm run test:e2e` | PostgreSQL/Redis; model and vector-store fixtures |
-| `pnpm run test:vectors` | Real Milvus storage operations; synthetic vectors |
+| Command                  | Dependencies and coverage                                              |
+| ------------------------ | ---------------------------------------------------------------------- |
+| `pnpm test`              | Unit tests; no external services                                       |
+| `pnpm run test:e2e`      | PostgreSQL/Redis; model and vector-store fixtures                      |
+| `pnpm run test:vectors`  | Real Milvus storage operations; synthetic vectors                      |
 | `pnpm run test:semantic` | PostgreSQL/Redis/Milvus; explicit model responses supplied by the test |
 
 Database integration tests require a migrated test database configured by

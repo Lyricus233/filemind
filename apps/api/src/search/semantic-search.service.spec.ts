@@ -89,6 +89,7 @@ describe('SemanticSearchService', () => {
     expect(prisma.fileChunk.findMany.mock.calls[0][0].where.file).toEqual({
       indexStatus: 'READY',
       vectorCollection: target.collection,
+      deletedAt: null,
       id: fileId,
     });
   });

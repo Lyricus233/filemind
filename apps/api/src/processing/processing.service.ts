@@ -81,6 +81,7 @@ export class ProcessingService {
           const claim = await tx.file.updateMany({
             where: {
               id,
+              deletedAt: null,
               OR: [
                 { indexStatus: { not: IndexStatus.PROCESSING } },
                 { indexJobId: jobId },
@@ -100,6 +101,10 @@ export class ProcessingService {
           const previous = await tx.fileChunk.findMany({
             where: { fileId: id },
             orderBy: { index: 'asc' },
+          });
+          await tx.fileVectorIndex.createMany({
+            data: [{ fileId: id, collection: target.collection }],
+            skipDuplicates: true,
           });
           const oldByIndex = new Map(
             previous.map((chunk) => [chunk.index, chunk]),
@@ -135,7 +140,12 @@ export class ProcessingService {
         })),
       );
       const published = await this.prisma.file.updateMany({
-        where: { id, indexJobId: jobId, indexStatus: IndexStatus.PROCESSING },
+        where: {
+          id,
+          indexJobId: jobId,
+          indexStatus: IndexStatus.PROCESSING,
+          deletedAt: null,
+        },
         data: { indexStatus: IndexStatus.READY, indexedAt: new Date() },
       });
       if (published.count !== 1)
@@ -154,6 +164,7 @@ export class ProcessingService {
         await this.prisma.file.updateMany({
           where: {
             id,
+            deletedAt: null,
             ...(claimed
               ? { indexJobId: jobId, indexStatus: IndexStatus.PROCESSING }
               : { indexStatus: IndexStatus.PENDING }),
@@ -215,10 +226,15 @@ export class ProcessingService {
   private async findFile(id: string) {
     const file = await this.prisma.file.findUnique({
       where: { id },
-      select: { id: true, originalName: true, storageKey: true },
+      select: {
+        id: true,
+        originalName: true,
+        storageKey: true,
+        deletedAt: true,
+      },
     });
 
-    if (file === null) {
+    if (file === null || file.deletedAt) {
       throw new NotFoundException('File not found');
     }
 

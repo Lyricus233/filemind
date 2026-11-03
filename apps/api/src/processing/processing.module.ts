@@ -24,5 +24,6 @@ import { ProcessingController } from './processing.controller.js';
   ],
   controllers: [ProcessingController],
   providers: [ProcessingJobsService],
+  exports: [ProcessingJobsService],
 })
 export class ProcessingModule {}

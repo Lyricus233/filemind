@@ -3,13 +3,9 @@ import type { ClientConfig } from '@zilliz/milvus2-sdk-node';
 
 import { VectorStoreError } from './vector-store-error.js';
 
-export function vectorStoreConfig(config: ConfigService) {
+export function milvusClientConfig(config: ConfigService): ClientConfig {
   const address =
     config.get<string>('MILVUS_ADDRESS')?.trim() ?? '127.0.0.1:19530';
-  const collection =
-    config.get<string>('MILVUS_COLLECTION')?.trim() ?? 'filemind_chunks_v1';
-  const model = config.get<string>('EMBEDDING_MODEL')?.trim();
-  const dimensions = Number(config.get<string>('EMBEDDING_DIMENSIONS'));
   const token = config.get<string>('MILVUS_TOKEN')?.trim();
 
   let url: URL;
@@ -36,24 +32,6 @@ export function vectorStoreConfig(config: ConfigService) {
       'configuration',
     );
   }
-  if (!/^[A-Za-z_][A-Za-z0-9_]{0,254}$/u.test(collection)) {
-    throw new VectorStoreError(
-      'MILVUS_COLLECTION must be a valid collection name',
-      'configuration',
-    );
-  }
-  if (
-    !model ||
-    !Number.isInteger(dimensions) ||
-    dimensions < 2 ||
-    dimensions > 32768
-  ) {
-    throw new VectorStoreError(
-      'Set EMBEDDING_MODEL and EMBEDDING_DIMENSIONS (2–32768) before using vectors',
-      'configuration',
-    );
-  }
-
   const explicitPort = /:(\d+)\/?$/u.exec(address)?.[1];
   const port =
     url.port ||
@@ -76,8 +54,37 @@ export function vectorStoreConfig(config: ConfigService) {
     logLevel: 'error',
     telemetry: { enabled: false },
   };
+  return client;
+}
+
+export function assertCollectionName(collection: string) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]{0,254}$/u.test(collection)) {
+    throw new VectorStoreError(
+      'Milvus collection name is invalid',
+      'configuration',
+    );
+  }
+}
+
+export function vectorStoreConfig(config: ConfigService) {
+  const collection =
+    config.get<string>('MILVUS_COLLECTION')?.trim() ?? 'filemind_chunks_v1';
+  const model = config.get<string>('EMBEDDING_MODEL')?.trim();
+  const dimensions = Number(config.get<string>('EMBEDDING_DIMENSIONS'));
+  assertCollectionName(collection);
+  if (
+    !model ||
+    !Number.isInteger(dimensions) ||
+    dimensions < 2 ||
+    dimensions > 32768
+  ) {
+    throw new VectorStoreError(
+      'Set EMBEDDING_MODEL and EMBEDDING_DIMENSIONS (2–32768) before using vectors',
+      'configuration',
+    );
+  }
   return {
-    client,
+    client: milvusClientConfig(config),
     collection,
     model,
     dimensions,

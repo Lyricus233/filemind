@@ -6,6 +6,7 @@ import { Test } from '@nestjs/testing';
 import { parse } from 'content-disposition';
 import request from 'supertest';
 
+import { FileDeletionService } from './file-deletion.service.js';
 import { FilesController } from './files.controller.js';
 import { FilesService } from './files.service.js';
 
@@ -17,11 +18,13 @@ describe('FilesController download', () => {
   const filesService = {
     getDownload: vi.fn(),
   };
+  const deletion = { remove: vi.fn() };
 
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       controllers: [FilesController],
       providers: [
+        { provide: FileDeletionService, useValue: deletion },
         {
           provide: FilesService,
           useValue: filesService,
@@ -76,5 +79,19 @@ describe('FilesController download', () => {
     );
 
     await request(app.getHttpServer()).get(`/files/${id}/download`).expect(404);
+  });
+
+  it('returns 204 after deletion without a JSON response body', async () => {
+    deletion.remove.mockResolvedValue(undefined);
+    const response = await request(app.getHttpServer())
+      .delete(`/files/${id}`)
+      .expect(204);
+    expect(response.text).toBe('');
+    expect(deletion.remove).toHaveBeenCalledWith(id);
+  });
+
+  it('rejects an invalid deletion UUID before calling the service', async () => {
+    await request(app.getHttpServer()).delete('/files/invalid').expect(400);
+    expect(deletion.remove).not.toHaveBeenCalled();
   });
 });

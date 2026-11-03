@@ -13,12 +13,14 @@ tracks remaining product capabilities rather than a percentage-complete estimate
 - Configurable remote embeddings through the OpenAI SDK; Qwen is the current model.
 - Milvus vector storage, cosine search, model/dimension checks and file filters.
 - Text indexing lifecycle and semantic search returning original source passages.
+- Retryable file deletion across local storage, PostgreSQL and tracked Milvus
+  collections, with processing/deletion coordination.
 - Unit, API, real Milvus and complete retrieval integration tests.
 
 ## Next backend milestones
 
-1. **File/index management:** deletion across the file store, PostgreSQL and Milvus;
-   content hashes and duplicate detection; bulk indexing, index rebuilding,
+1. **File/index management:** content hashes and duplicate detection;
+   bulk indexing, index rebuilding,
    orphan cleanup and durable task/progress history.
 2. **More document formats:** PDF and DOCX first; then PPTX, spreadsheets and HTML
    as needed. Preserve page/section/table locations and improve structural chunking.

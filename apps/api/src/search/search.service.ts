@@ -13,6 +13,7 @@ export class SearchService {
     const { q, fileId, page, limit } = query;
 
     const where: Prisma.FileChunkWhereInput = {
+      file: { deletedAt: null },
       content: { contains: escapeLikeLiteral(q) },
       ...(fileId === undefined ? {} : { fileId }),
     };
