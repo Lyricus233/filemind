@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import { type Job, UnrecoverableError } from 'bullmq';
 
+import { EmbeddingError } from '../embeddings/embedding-error.js';
+import { VectorStoreError } from '../vectors/vector-store-error.js';
 import {
   PROCESS_FILE_JOB,
   type ProcessingJobData,
@@ -39,7 +41,7 @@ describe('ProcessingProcessor', () => {
     const result = { fileId, chunkCount: 3, chunkSize: 500, overlap: 100 };
     processing.process.mockResolvedValue(result);
     await expect(processor.process(job)).resolves.toEqual(result);
-    expect(processing.process).toHaveBeenCalledWith(fileId);
+    expect(processing.process).toHaveBeenCalledWith(fileId, job.id);
   });
 
   it.each([
@@ -57,8 +59,20 @@ describe('ProcessingProcessor', () => {
   });
 
   it.each([
+    new EmbeddingError('Invalid API key', 'authentication'),
+    new VectorStoreError('Wrong collection schema', 'schema_mismatch'),
+  ])('does not retry permanent model or collection errors', async (error) => {
+    processing.process.mockRejectedValue(error);
+    await expect(processor.process(job)).rejects.toBeInstanceOf(
+      UnrecoverableError,
+    );
+  });
+
+  it.each([
     new ConflictException('Processing conflict; retry the request'),
     new Error('Database connection lost; internal connection details'),
+    new EmbeddingError('Rate limit', 'rate_limit', true),
+    new VectorStoreError('Connection lost', 'unavailable', true),
   ])(
     'allows retrying a transient failure without exposing its internals: %s',
     async (error) => {

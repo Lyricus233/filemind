@@ -151,6 +151,8 @@ export class FilesService {
       sizeBytes: file.sizeBytes.toString(),
       createdAt: file.createdAt,
       updatedAt: file.updatedAt,
+      indexStatus: file.indexStatus,
+      indexedAt: file.indexedAt,
     };
   }
 }

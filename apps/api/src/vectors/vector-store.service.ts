@@ -91,7 +91,11 @@ export class VectorStoreService implements OnModuleDestroy {
 
   async search(
     vector: readonly number[],
-    options: { limit?: number; fileId?: string } = {},
+    options: {
+      limit?: number;
+      fileId?: string;
+      excludeFileIds?: readonly string[];
+    } = {},
   ): Promise<VectorMatch[]> {
     this.validateVector(vector);
     const limit = options.limit ?? 20;
@@ -102,6 +106,13 @@ export class VectorStoreService implements OnModuleDestroy {
       );
     }
     if (options.fileId !== undefined) this.validateId(options.fileId);
+    const excluded = [...new Set(options.excludeFileIds ?? [])];
+    excluded.forEach((id) => this.validateId(id));
+    const filters: string[] = [];
+    if (options.fileId)
+      filters.push(`file_id == ${JSON.stringify(options.fileId)}`);
+    if (excluded.length)
+      filters.push(`file_id not in ${JSON.stringify(excluded)}`);
 
     return this.operation(async () => {
       const client = await this.connection();
@@ -114,9 +125,7 @@ export class VectorStoreService implements OnModuleDestroy {
         // SDK 3.x treats numeric Strong (0) as falsy. Use the validated
         // collection's Strong default and explicitly return its custom primary key.
         output_fields: ['chunk_id', 'file_id', 'chunk_index'],
-        ...(options.fileId
-          ? { filter: `file_id == ${JSON.stringify(options.fileId)}` }
-          : {}),
+        ...(filters.length ? { filter: filters.join(' and ') } : {}),
       });
       assertMilvusSuccess(response.status);
       const matches: VectorMatch[] = [];
@@ -132,7 +141,8 @@ export class VectorStoreService implements OnModuleDestroy {
           row.chunk_index > 2147483647 ||
           !Number.isFinite(row.score) ||
           seen.has(row.chunk_id) ||
-          (options.fileId !== undefined && row.file_id !== options.fileId)
+          (options.fileId !== undefined && row.file_id !== options.fileId) ||
+          excluded.includes(row.file_id as string)
         ) {
           throw new VectorStoreError(
             'Milvus returned an invalid search result',

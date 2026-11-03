@@ -15,7 +15,7 @@ describe('ProcessingJobsService', () => {
   const fileId = 'e71d88f0-9b85-48bc-8cac-c9b28ac19a2f';
   const jobId = '2bd23a57-6d56-4cbb-8986-9c24acdc1d89';
   const queue = { add: vi.fn(), getJob: vi.fn(), on: vi.fn(), off: vi.fn() };
-  const prisma = { file: { findUnique: vi.fn() } };
+  const prisma = { file: { findUnique: vi.fn(), updateMany: vi.fn() } };
   let service: ProcessingJobsService;
 
   beforeEach(() => {
@@ -55,6 +55,49 @@ describe('ProcessingJobsService', () => {
     const existingId = '85595c9d-2b47-4d7f-9309-bb93a6a3f894';
     queue.add.mockResolvedValue({ id: existingId });
     expect(await service.enqueue(fileId)).toMatchObject({ jobId: existingId });
+  });
+
+  it('uses the database UUID spelling for queue deduplication', async () => {
+    await service.enqueue(fileId.toUpperCase());
+    expect(queue.add).toHaveBeenCalledWith(
+      PROCESS_FILE_JOB,
+      { fileId },
+      expect.objectContaining({ deduplication: { id: fileId } }),
+    );
+  });
+
+  it.each(['failed', 'completed', undefined])(
+    'allows reprocessing after an abandoned job is %s',
+    async (state) => {
+      prisma.file.findUnique.mockResolvedValue({
+        id: fileId,
+        storageKey: 'blob-key',
+        indexStatus: 'PROCESSING',
+        indexJobId: jobId,
+      });
+      queue.getJob.mockResolvedValue(
+        state ? { getState: vi.fn().mockResolvedValue(state) } : undefined,
+      );
+      await service.enqueue(fileId);
+      expect(prisma.file.updateMany).toHaveBeenCalledWith({
+        where: { id: fileId, indexStatus: 'PROCESSING', indexJobId: jobId },
+        data: { indexStatus: 'FAILED' },
+      });
+    },
+  );
+
+  it('leaves a live processing job owned by the current worker', async () => {
+    prisma.file.findUnique.mockResolvedValue({
+      id: fileId,
+      storageKey: 'blob-key',
+      indexStatus: 'PROCESSING',
+      indexJobId: jobId,
+    });
+    queue.getJob.mockResolvedValue({
+      getState: vi.fn().mockResolvedValue('active'),
+    });
+    await service.enqueue(fileId);
+    expect(prisma.file.updateMany).not.toHaveBeenCalled();
   });
 
   it('rejects a missing file before accessing the queue', async () => {

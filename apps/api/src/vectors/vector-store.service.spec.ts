@@ -353,6 +353,18 @@ describe('VectorStoreService', () => {
     });
   });
 
+  it('excludes in-progress files in the server-side search filter', async () => {
+    await service().search([1, 0, 0], {
+      fileId,
+      excludeFileIds: [chunkId, chunkId],
+    });
+    expect(sdk.client.search).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filter: `file_id == "${fileId}" and file_id not in ["${chunkId}"]`,
+      }),
+    );
+  });
+
   it('rejects a filter injection before connecting', async () => {
     await expect(service().deleteByFile('" or true')).rejects.toMatchObject({
       code: 'invalid_input',

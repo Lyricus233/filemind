@@ -8,10 +8,12 @@ import { getQueueToken, getSharedConfigToken } from '@nestjs/bullmq';
 import type { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
+import { MilvusClient } from '@zilliz/milvus2-sdk-node';
 import request from 'supertest';
 
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
+import { EmbeddingsService } from '../src/embeddings/embeddings.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { redisConnection } from '../src/processing/processing-queue.config.js';
 import {
@@ -19,7 +21,11 @@ import {
   type ProcessingQueue,
 } from '../src/processing/processing-queue.types.js';
 import { StorageService } from '../src/storage/storage.service.js';
+import { assertMilvusSuccess } from '../src/vectors/vector-store-error.js';
+import { vectorStoreConfig } from '../src/vectors/vector-store.config.js';
+import { VectorStoreService } from '../src/vectors/vector-store.service.js';
 import { WorkerModule } from '../src/worker.module.js';
+import { FIXTURE_MODEL, FixtureVectorStore } from './semantic-fixtures.js';
 
 interface Chunk {
   id: string;
@@ -39,11 +45,31 @@ interface JobStatus {
 describe('File retrieval pipeline (e2e)', () => {
   const prefix = `filemind-e2e-${randomUUID()}`;
   const fileIds: string[] = [];
+  const collection = `filemind_pipeline_${randomUUID().replaceAll('-', '')}`;
+  const realVectors = process.env.FILEMIND_E2E_VECTORS === 'real';
+  const realEmbeddings = process.env.FILEMIND_E2E_EMBEDDINGS === 'real';
+  const fakeVectors = new FixtureVectorStore(collection);
+  const embeddingStub = { embed: vi.fn<EmbeddingsService['embed']>() };
+  let cleanupClient: MilvusClient | undefined;
+  let ownsCollection = false;
   let app: INestApplication | undefined;
   let worker: TestingModule | undefined;
   let prisma: PrismaService | undefined;
   let queue: ProcessingQueue | undefined;
   let storageDirectory: string | undefined;
+
+  beforeEach(() => {
+    embeddingStub.embed.mockReset();
+    embeddingStub.embed.mockImplementation(async (texts) => ({
+      model: FIXTURE_MODEL,
+      dimensions: 3,
+      vectors: texts.map(() => [0, 0, 1]),
+    }));
+  });
+
+  afterEach(() => {
+    if (realEmbeddings) expect(embeddingStub.embed).not.toHaveBeenCalled();
+  });
 
   beforeAll(async () => {
     storageDirectory = await mkdtemp(join(tmpdir(), 'filemind-e2e-'));
@@ -52,17 +78,43 @@ describe('File retrieval pipeline (e2e)', () => {
       STORAGE_DIR: storageDirectory,
       REDIS_HOST: process.env.E2E_REDIS_HOST ?? '127.0.0.1',
       REDIS_PORT: process.env.E2E_REDIS_PORT ?? '6379',
+      MILVUS_ADDRESS: process.env.E2E_MILVUS_ADDRESS ?? '127.0.0.1:19530',
+      MILVUS_TOKEN: process.env.E2E_MILVUS_TOKEN ?? '',
+      MILVUS_COLLECTION: collection,
+      EMBEDDING_MODEL: realEmbeddings
+        ? process.env.EMBEDDING_MODEL
+        : FIXTURE_MODEL,
+      EMBEDDING_DIMENSIONS: realEmbeddings
+        ? process.env.EMBEDDING_DIMENSIONS
+        : '3',
+      EMBEDDING_BASE_URL: process.env.EMBEDDING_BASE_URL,
+      EMBEDDING_API_KEY: process.env.EMBEDDING_API_KEY,
     });
 
-    const apiModule = await Test.createTestingModule({ imports: [AppModule] })
+    if (realVectors) {
+      cleanupClient = new MilvusClient(vectorStoreConfig(config).client);
+      await cleanupClient.connectPromise;
+      const existing = await cleanupClient.hasCollection({
+        collection_name: collection,
+      });
+      assertMilvusSuccess(existing.status);
+      expect(existing.value).toBe(false);
+      ownsCollection = true;
+    }
+
+    const apiBuilder = Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(ConfigService)
       .useValue(config)
       .overrideProvider(getSharedConfigToken())
       .useValue({
         connection: redisConnection(config, 'api'),
         prefix,
-      })
-      .compile();
+      });
+    if (!realEmbeddings)
+      apiBuilder.overrideProvider(EmbeddingsService).useValue(embeddingStub);
+    if (!realVectors)
+      apiBuilder.overrideProvider(VectorStoreService).useValue(fakeVectors);
+    const apiModule = await apiBuilder.compile();
 
     app = apiModule.createNestApplication();
     configureApp(app);
@@ -72,20 +124,24 @@ describe('File retrieval pipeline (e2e)', () => {
     await app.init();
     prisma = app.get(PrismaService);
 
-    worker = await Test.createTestingModule({ imports: [WorkerModule] })
+    const workerBuilder = Test.createTestingModule({ imports: [WorkerModule] })
       .overrideProvider(ConfigService)
       .useValue(config)
       .overrideProvider(getSharedConfigToken())
       .useValue({
         connection: redisConnection(config, 'worker'),
         prefix,
-      })
-      .compile();
+      });
+    if (!realEmbeddings)
+      workerBuilder.overrideProvider(EmbeddingsService).useValue(embeddingStub);
+    if (!realVectors)
+      workerBuilder.overrideProvider(VectorStoreService).useValue(fakeVectors);
+    worker = await workerBuilder.compile();
     expect(
       worker.get<ProcessingQueue>(getQueueToken(PROCESSING_QUEUE)).opts.prefix,
     ).toBe(prefix);
     await worker.init();
-  }, 20000);
+  }, 60000);
 
   afterAll(async () => {
     try {
@@ -107,7 +163,27 @@ describe('File retrieval pipeline (e2e)', () => {
       }
     } finally {
       await app?.close();
-      if (storageDirectory) await rmdir(storageDirectory);
+      try {
+        if (
+          cleanupClient &&
+          ownsCollection &&
+          /^filemind_pipeline_[0-9a-f]{32}$/u.test(collection)
+        ) {
+          const exists = await cleanupClient.hasCollection({
+            collection_name: collection,
+          });
+          assertMilvusSuccess(exists.status);
+          if (exists.value)
+            assertMilvusSuccess(
+              await cleanupClient.dropCollection({
+                collection_name: collection,
+              }),
+            );
+        }
+      } finally {
+        await cleanupClient?.closeConnection();
+        if (storageDirectory) await rmdir(storageDirectory);
+      }
     }
   }, 20000);
 
@@ -136,7 +212,7 @@ describe('File retrieval pipeline (e2e)', () => {
     };
     expect(statusUrl).toBe(`/files/${fileId}/processing-jobs/${jobId}`);
 
-    const deadline = Date.now() + 10000;
+    const deadline = Date.now() + 60000;
     while (Date.now() < deadline) {
       const status = await request(app!.getHttpServer())
         .get(statusUrl)
@@ -263,7 +339,101 @@ describe('File retrieval pipeline (e2e)', () => {
     expect(repeated.body.items.map(contentAndOffsets)).toEqual(
       chunks.map(contentAndOffsets),
     );
-  }, 20000);
+  }, 120000);
+
+  it.each([
+    {},
+    { q: ' ' },
+    { q: 'x', limit: 0 },
+    { q: 'x', fileId: 'invalid' },
+    { q: 'x', page: 1 },
+  ])('validates semantic query parameters: %j', async (query) => {
+    await request(app!.getHttpServer())
+      .get('/search/semantic')
+      .query(query)
+      .expect(400);
+  });
+
+  it(
+    realEmbeddings
+      ? 'retrieves a Chinese passage for an English query using the real embedding provider'
+      : 'returns provider-ranked chunks and enforces file filtering with controlled test vectors',
+    async () => {
+      const weatherText = '天气预报说明天会下雨，出门时请带一把雨伞。';
+      const databaseText = '数据库索引可以加速查询，避免扫描整张数据表。';
+      if (!realEmbeddings) {
+        const responses = new Map<string, number[]>([
+          [weatherText, [1, 0, 0]],
+          [databaseText, [0, 1, 0]],
+          ['rainy weather', [1, 0, 0]],
+        ]);
+        embeddingStub.embed.mockImplementation(async (texts) => ({
+          model: FIXTURE_MODEL,
+          dimensions: 3,
+          vectors: texts.map((text) => {
+            const vector = responses.get(text);
+            if (!vector)
+              throw new Error('Unexpected embedding input in retrieval test');
+            return [...vector];
+          }),
+        }));
+      }
+      const weather = await upload(Buffer.from(weatherText), 'weather.txt');
+      const database = await upload(Buffer.from(databaseText), 'database.md');
+      const before = await request(app!.getHttpServer())
+        .get('/search/semantic')
+        .query({ q: 'rainy weather', fileId: weather.id })
+        .expect(200);
+      expect(before.body.items).toEqual([]);
+      for (const file of [weather, database])
+        expect((await processFile(file.id)).state).toBe('completed');
+
+      const literal = await request(app!.getHttpServer())
+        .get('/search')
+        .query({ q: 'rainy weather', fileId: weather.id })
+        .expect(200);
+      expect(literal.body.items).toEqual([]);
+      const semantic = await request(app!.getHttpServer())
+        .get('/search/semantic')
+        .query({ q: 'rainy weather', limit: 2 })
+        .expect(200);
+      expect(semantic.body.mode).toBe('semantic');
+      expect(semantic.body.items[0].file.id).toBe(weather.id);
+      expect(semantic.body.items[0].content).toContain('雨伞');
+      expect(semantic.body.items[0].score).toEqual(expect.any(Number));
+      const scoped = await request(app!.getHttpServer())
+        .get('/search/semantic')
+        .query({ q: 'rainy weather', fileId: database.id })
+        .expect(200);
+      expect(scoped.body.items).toHaveLength(1);
+      expect(
+        scoped.body.items.every(
+          (item: { file: { id: string } }) => item.file.id === database.id,
+        ),
+      ).toBe(true);
+      const metadata = await request(app!.getHttpServer())
+        .get(`/files/${weather.id}`)
+        .expect(200);
+      expect(metadata.body.indexStatus).toBe('READY');
+      expect(metadata.body.indexedAt).toEqual(expect.any(String));
+
+      await prisma!.file.update({
+        where: { id: weather.id },
+        data: { indexStatus: 'FAILED' },
+      });
+      const hidden = await request(app!.getHttpServer())
+        .get('/search/semantic')
+        .query({ q: 'rainy weather', limit: 2 })
+        .expect(200);
+      expect(
+        hidden.body.items.some(
+          (item: { file: { id: string } }) => item.file.id === weather.id,
+        ),
+      ).toBe(false);
+      expect((await processFile(weather.id)).state).toBe('completed');
+    },
+    120000,
+  );
 
   it('reports invalid UTF-8 as a terminal job failure', async () => {
     const file = await upload(Buffer.from([0xff, 0xfe, 0x80]));

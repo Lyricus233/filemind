@@ -10,6 +10,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 
+import { IndexStatus } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
   PROCESSING_QUEUE,
@@ -41,15 +42,45 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
   async enqueue(fileId: string) {
     const file = await this.prisma.file.findUnique({
       where: { id: fileId },
-      select: { id: true, storageKey: true },
+      select: {
+        id: true,
+        storageKey: true,
+        indexStatus: true,
+        indexJobId: true,
+      },
     });
 
     if (file === null) {
       throw new NotFoundException('File not found');
     }
+    fileId = file.id;
 
     if (file.storageKey === null) {
       throw new NotFoundException('File content is unavailable');
+    }
+
+    if (file.indexStatus === IndexStatus.PROCESSING && file.indexJobId) {
+      const previous = await this.withQueue(() =>
+        this.queue.getJob(file.indexJobId!),
+      );
+      const state = previous
+        ? await this.withQueue(() => previous.getState())
+        : undefined;
+      if (
+        state === undefined ||
+        state === 'unknown' ||
+        state === 'failed' ||
+        state === 'completed'
+      ) {
+        await this.prisma.file.updateMany({
+          where: {
+            id: file.id,
+            indexStatus: IndexStatus.PROCESSING,
+            indexJobId: file.indexJobId,
+          },
+          data: { indexStatus: IndexStatus.FAILED },
+        });
+      }
     }
 
     const job = await this.withQueue(() =>

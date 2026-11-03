@@ -2,8 +2,9 @@
 
 FileMind uses PostgreSQL for files and text chunks, and Milvus for vector similarity
 search. The `VectorsModule` exports `VectorStoreService` for the indexing and search
-pipeline. This milestone provides storage operations; the processing worker and
-`GET /search` do not yet call them.
+pipeline. The processing worker now embeds text chunks and writes their vectors.
+`GET /search/semantic` performs semantic retrieval; `GET /search` remains literal
+search. See [Semantic search](semantic-search.md) for the complete workflow.
 
 ## Local setup
 

@@ -2,6 +2,8 @@ import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { type Job, UnrecoverableError } from 'bullmq';
 
+import { EmbeddingError } from '../embeddings/embedding-error.js';
+import { VectorStoreError } from '../vectors/vector-store-error.js';
 import {
   PROCESSING_QUEUE,
   PROCESS_FILE_JOB,
@@ -26,8 +28,23 @@ export class ProcessingProcessor extends WorkerHost {
     }
 
     try {
-      return await this.processingService.process(job.data.fileId);
+      if (!job.id) throw new UnrecoverableError('Processing job ID is missing');
+      return await this.processingService.process(job.data.fileId, job.id);
     } catch (error) {
+      if (error instanceof UnrecoverableError) throw error;
+      if (
+        (error instanceof EmbeddingError ||
+          error instanceof VectorStoreError) &&
+        !error.retryable
+      ) {
+        this.logger.error(
+          `File indexing failed for job ${job.id}`,
+          error.stack,
+        );
+        throw new UnrecoverableError(
+          'File indexing configuration or input is invalid; see worker logs',
+        );
+      }
       if (error instanceof HttpException) {
         switch (error.getStatus()) {
           case HttpStatus.NOT_FOUND:
