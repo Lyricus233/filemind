@@ -4,6 +4,10 @@
 Use it after uploading or indexing a disposable file to verify the complete file
 lifecycle. This operation permanently removes the stored content.
 
+Content-identical uploads keep separate file records and stored content. Removing
+one copy does not remove another copy. See [Content hashes and duplicate detection](file-duplicates.md)
+to find copies before deciding which files to index or delete.
+
 ## Run locally
 
 From `apps/api`, apply the migration, regenerate the Prisma client and build:

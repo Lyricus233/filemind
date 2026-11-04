@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -14,7 +14,10 @@ describe('FilesService', () => {
     file: {
       create: vi.fn(),
       findUnique: vi.fn(),
+      findMany: vi.fn(),
+      count: vi.fn(),
     },
+    $transaction: vi.fn(),
   };
 
   const storage = {
@@ -28,6 +31,8 @@ describe('FilesService', () => {
     mimeType: 'text/plain',
     buffer: Buffer.from('hello'),
   };
+  const contentHash =
+    '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824';
 
   beforeEach(async () => {
     vi.resetAllMocks();
@@ -58,6 +63,7 @@ describe('FilesService', () => {
       mimeType: 'text/plain',
       sizeBytes: 5n,
       storageKey: 'blob-key',
+      contentHash,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -68,6 +74,7 @@ describe('FilesService', () => {
       originalName: 'notes.txt',
       mimeType: 'text/plain',
       sizeBytes: '5',
+      contentHash,
     });
 
     expect(storage.save).toHaveBeenCalledWith(input.buffer);
@@ -78,6 +85,7 @@ describe('FilesService', () => {
         mimeType: 'text/plain',
         sizeBytes: 5n,
         storageKey: 'blob-key',
+        contentHash,
       },
     });
 
@@ -111,6 +119,75 @@ describe('FilesService', () => {
     await expect(
       service.findOne('11111111-1111-4111-8111-111111111111'),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  describe('findDuplicates', () => {
+    const id = 'a1111111-1111-4111-8111-111111111111';
+    const query = { page: 2, limit: 1 };
+
+    it('returns paginated, JSON-safe metadata with the same hash and excludes the source', async () => {
+      prisma.file.findUnique.mockResolvedValue({
+        id,
+        contentHash,
+        deletedAt: null,
+      });
+      prisma.$transaction.mockResolvedValue([
+        [{ id: 'copy', originalName: 'copy.md', sizeBytes: 5n, contentHash }],
+        3,
+      ]);
+      const result = await service.findDuplicates(id.toUpperCase(), query);
+      expect(result).toMatchObject({
+        fileId: id,
+        algorithm: 'sha256',
+        contentHash,
+        items: [
+          { id: 'copy', originalName: 'copy.md', sizeBytes: '5', contentHash },
+        ],
+        total: 3,
+        page: 2,
+        limit: 1,
+        totalPages: 3,
+      });
+      expect(prisma.file.findMany).toHaveBeenCalledWith({
+        where: { contentHash, deletedAt: null, id: { not: id } },
+        skip: 1,
+        take: 1,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      });
+      expect(prisma.file.count).toHaveBeenCalledWith({
+        where: { contentHash, deletedAt: null, id: { not: id } },
+      });
+    });
+
+    it('does not report an unknown legacy hash as proof of no duplicates', async () => {
+      prisma.file.findUnique.mockResolvedValue({
+        id,
+        contentHash: null,
+        deletedAt: null,
+      });
+      try {
+        await service.findDuplicates(id, query);
+        expect.unreachable();
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConflictException);
+        expect((error as ConflictException).getResponse()).toMatchObject({
+          statusCode: 409,
+          code: 'FILE_HASH_UNAVAILABLE',
+        });
+      }
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it.each([null, { id, deletedAt: new Date(), contentHash }])(
+      'rejects a missing or hidden source file: %j',
+      async (file) => {
+        prisma.file.findUnique.mockResolvedValue(file);
+        await expect(service.findDuplicates(id, query)).rejects.toBeInstanceOf(
+          NotFoundException,
+        );
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('getDownload', () => {

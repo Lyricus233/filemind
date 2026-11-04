@@ -8,6 +8,7 @@
   "type": "module",
   "scripts": {
     "build": "nest build",
+    "files:hash-backfill": "node dist/files/backfill-hashes.js",
     "embeddings:check": "node dist/embeddings/check.js",
     "vectors:check": "node dist/vectors/check.js",
     "deploy": "nest deploy",

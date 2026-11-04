@@ -17,6 +17,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { create as createContentDisposition } from 'content-disposition';
 import { memoryStorage } from 'multer';
 
+import { ListDuplicatesQueryDto } from './dto/list-duplicates-query.dto.js';
 import { ListFilesQueryDto } from './dto/list-files-query.dto.js';
 import { FileDeletionService } from './file-deletion.service.js';
 import { FilesService } from './files.service.js';
@@ -75,6 +76,14 @@ export class FilesController {
       disposition: createContentDisposition(file.originalName),
       length: Number(file.sizeBytes),
     });
+  }
+
+  @Get(':id/duplicates')
+  findDuplicates(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListDuplicatesQueryDto,
+  ) {
+    return this.filesService.findDuplicates(id, query);
   }
 
   @Get(':id')

@@ -14,6 +14,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { configureApp } from '../src/app.setup.js';
 import { EmbeddingsService } from '../src/embeddings/embeddings.service.js';
+import { FileHashBackfillService } from '../src/files/file-hash-backfill.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { redisConnection } from '../src/processing/processing-queue.config.js';
 import {
@@ -199,6 +200,7 @@ describe('File retrieval pipeline (e2e)', () => {
       id: string;
       originalName: string;
       sizeBytes: string;
+      contentHash: string;
     };
   }
 
@@ -231,6 +233,237 @@ describe('File retrieval pipeline (e2e)', () => {
       .expect(200);
     expect(result.body).toEqual({ status: 'ok', service: 'filemind-api' });
   });
+
+  it('finds byte-identical uploads across filenames, paginates and excludes deleted copies', async () => {
+    const bytes = Buffer.from('Exact content for duplicate detection.\r\n');
+    const source = await upload(bytes, 'duplicate-source.txt');
+    const copies = await Promise.all([
+      upload(bytes, 'renamed-copy.md'),
+      upload(bytes, '另一份副本.txt'),
+      upload(bytes, 'duplicate-source.txt'),
+    ]);
+    const different = await upload(
+      Buffer.from('Exact content for duplicate detection.\n'),
+      'duplicate-source.txt',
+    );
+    expect(source.contentHash).toMatch(/^[0-9a-f]{64}$/u);
+    expect(
+      copies.every((file) => file.contentHash === source.contentHash),
+    ).toBe(true);
+    expect(different.contentHash).not.toBe(source.contentHash);
+    expect(new Set([source.id, ...copies.map((file) => file.id)]).size).toBe(4);
+    const detail = await request(app!.getHttpServer())
+      .get(`/files/${source.id}`)
+      .expect(200);
+    expect(detail.body.contentHash).toBe(source.contentHash);
+    const list = await request(app!.getHttpServer()).get('/files').expect(200);
+    expect(
+      list.body.items.find((file: { id: string }) => file.id === source.id)
+        .contentHash,
+    ).toBe(source.contentHash);
+
+    const first = await request(app!.getHttpServer())
+      .get(`/files/${source.id.toUpperCase()}/duplicates`)
+      .query({ page: 1, limit: 2 })
+      .expect(200);
+    expect(first.body).toMatchObject({
+      fileId: source.id,
+      algorithm: 'sha256',
+      contentHash: source.contentHash,
+      total: 3,
+      page: 1,
+      limit: 2,
+      totalPages: 2,
+    });
+    expect(first.body.items).toHaveLength(2);
+    const second = await request(app!.getHttpServer())
+      .get(`/files/${source.id}/duplicates`)
+      .query({ page: 2, limit: 2 })
+      .expect(200);
+    expect(second.body.items).toHaveLength(1);
+    const found = [...first.body.items, ...second.body.items].map(
+      (file: { id: string }) => file.id,
+    );
+    expect([...found].sort()).toEqual(copies.map((file) => file.id).sort());
+    const beyond = await request(app!.getHttpServer())
+      .get(`/files/${source.id}/duplicates`)
+      .query({ page: 3, limit: 2 })
+      .expect(200);
+    expect(beyond.body.items).toEqual([]);
+
+    for (const query of [
+      { page: 0 },
+      { limit: 101 },
+      { limit: 'invalid' },
+      { name: 'unused' },
+    ])
+      await request(app!.getHttpServer())
+        .get(`/files/${source.id}/duplicates`)
+        .query(query)
+        .expect(400);
+    await request(app!.getHttpServer())
+      .get('/files/invalid/duplicates')
+      .expect(400);
+    await request(app!.getHttpServer())
+      .get(`/files/${randomUUID()}/duplicates`)
+      .expect(404);
+
+    await request(app!.getHttpServer())
+      .delete(`/files/${copies[0].id}`)
+      .expect(204);
+    await prisma!.file.update({
+      where: { id: copies[1].id },
+      data: { deletedAt: new Date() },
+    });
+    const remaining = await request(app!.getHttpServer())
+      .get(`/files/${source.id}/duplicates`)
+      .expect(200);
+    expect(remaining.body.total).toBe(1);
+    expect(remaining.body.items[0].id).toBe(copies[2].id);
+    const download = await request(app!.getHttpServer())
+      .get(`/files/${copies[2].id}/download`)
+      .expect(200);
+    expect(download.text).toBe(bytes.toString());
+    await request(app!.getHttpServer())
+      .delete(`/files/${source.id}`)
+      .expect(204);
+    await request(app!.getHttpServer())
+      .get(`/files/${source.id}/duplicates`)
+      .expect(404);
+  }, 30000);
+
+  it('backfills unknown hashes, reports unavailable originals and safely resumes', async () => {
+    const bytes = Buffer.from('Legacy content for streamed hash backfill.');
+    const first = await upload(bytes, 'legacy-first.txt');
+    const second = await upload(bytes, 'legacy-second.txt');
+    const known = await upload(
+      Buffer.from('Already hashed content.'),
+      'known.txt',
+    );
+    const hidden = await upload(
+      Buffer.from('Hidden legacy content.'),
+      'legacy-hidden.txt',
+    );
+    const missingBytes = Buffer.from('Temporarily unavailable legacy content.');
+    const missing = await upload(missingBytes, 'legacy-missing.txt');
+    await prisma!.file.updateMany({
+      where: { id: { in: [first.id, second.id, missing.id] } },
+      data: { contentHash: null },
+    });
+    await prisma!.file.update({
+      where: { id: hidden.id },
+      data: { contentHash: null, deletedAt: new Date() },
+    });
+    const storage = app!.get(StorageService);
+    const missingRow = await prisma!.file.findUniqueOrThrow({
+      where: { id: missing.id },
+    });
+    await storage.remove(missingRow.storageKey!);
+    const unknown = await request(app!.getHttpServer())
+      .get(`/files/${first.id}/duplicates`)
+      .expect(409);
+    expect(unknown.body.code).toBe('FILE_HASH_UNAVAILABLE');
+    const before = await prisma!.file.findUniqueOrThrow({
+      where: { id: first.id },
+    });
+    const open = vi.spyOn(storage, 'openReadStream');
+    const warning = vi
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const service = new FileHashBackfillService(prisma!, storage);
+    try {
+      expect(await service.run()).toEqual({
+        scanned: 3,
+        updated: 2,
+        skipped: 0,
+        unavailable: 1,
+        failed: 0,
+      });
+      expect(open).toHaveBeenCalledTimes(3);
+      const unchanged = await prisma!.file.findUniqueOrThrow({
+        where: { id: known.id },
+      });
+      expect(unchanged.contentHash).toBe(known.contentHash);
+      const excluded = await prisma!.file.findUniqueOrThrow({
+        where: { id: hidden.id },
+      });
+      expect(excluded.contentHash).toBeNull();
+      const after = await prisma!.file.findUniqueOrThrow({
+        where: { id: first.id },
+      });
+      expect(after.contentHash).toBe(first.contentHash);
+      expect(after.indexStatus).toBe(before.indexStatus);
+      expect(after.indexJobId).toBe(before.indexJobId);
+      expect(after.indexedAt).toEqual(before.indexedAt);
+      const duplicates = await request(app!.getHttpServer())
+        .get(`/files/${first.id}/duplicates`)
+        .expect(200);
+      expect(duplicates.body.total).toBe(1);
+      expect(duplicates.body.items[0].id).toBe(second.id);
+      const restoredKey = await storage.save(missingBytes);
+      await prisma!.file.update({
+        where: { id: missing.id },
+        data: { storageKey: restoredKey },
+      });
+      expect(await service.run()).toEqual({
+        scanned: 1,
+        updated: 1,
+        skipped: 0,
+        unavailable: 0,
+        failed: 0,
+      });
+      expect(await service.run()).toEqual({
+        scanned: 0,
+        updated: 0,
+        skipped: 0,
+        unavailable: 0,
+        failed: 0,
+      });
+    } finally {
+      open.mockRestore();
+      warning.mockRestore();
+    }
+  }, 30000);
+
+  it('does not write a legacy hash when deletion starts while the content is being read', async () => {
+    const file = await upload(
+      Buffer.from('Hashing and deletion race.'),
+      'hash-race.txt',
+    );
+    await prisma!.file.update({
+      where: { id: file.id },
+      data: { contentHash: null },
+    });
+    const storage = app!.get(StorageService);
+    const original = storage.openReadStream.bind(storage);
+    const open = vi
+      .spyOn(storage, 'openReadStream')
+      .mockImplementationOnce(async (key) => {
+        await prisma!.file.update({
+          where: { id: file.id },
+          data: { deletedAt: new Date() },
+        });
+        return original(key);
+      });
+    try {
+      expect(await new FileHashBackfillService(prisma!, storage).run()).toEqual(
+        {
+          scanned: 1,
+          updated: 0,
+          skipped: 1,
+          unavailable: 0,
+          failed: 0,
+        },
+      );
+      const record = await prisma!.file.findUniqueOrThrow({
+        where: { id: file.id },
+      });
+      expect(record.contentHash).toBeNull();
+      expect(record.deletedAt).toBeInstanceOf(Date);
+    } finally {
+      open.mockRestore();
+    }
+  }, 30000);
 
   it.each([
     {},

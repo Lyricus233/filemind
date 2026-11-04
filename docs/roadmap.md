@@ -7,6 +7,8 @@ tracks remaining product capabilities rather than a percentage-complete estimate
 
 - NestJS/TypeScript API, Prisma/PostgreSQL, pnpm tooling and CI checks.
 - File upload, metadata listing/detail and streaming download with local storage.
+- SHA-256 content hashes, paginated duplicate detection and resumable legacy hash
+  backfill.
 - Strict UTF-8 TXT/Markdown extraction, chunking and source offsets.
 - Separate BullMQ/Redis processing worker, bounded retries and job status APIs.
 - Literal chunk search with match ranges and pagination.
@@ -19,8 +21,7 @@ tracks remaining product capabilities rather than a percentage-complete estimate
 
 ## Next backend milestones
 
-1. **File/index management:** content hashes and duplicate detection;
-   bulk indexing, index rebuilding,
+1. **File/index management:** bulk indexing, index rebuilding,
    orphan cleanup and durable task/progress history.
 2. **More document formats:** PDF and DOCX first; then PPTX, spreadsheets and HTML
    as needed. Preserve page/section/table locations and improve structural chunking.
