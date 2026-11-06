@@ -71,6 +71,7 @@ export class SemanticSearchService {
           content: true,
           startOffset: true,
           endOffset: true,
+          source: true,
           file: { select: { id: true, originalName: true, mimeType: true } },
         },
       });
@@ -91,6 +92,7 @@ export class SemanticSearchService {
             content: chunk.content,
             startOffset: chunk.startOffset,
             endOffset: chunk.endOffset,
+            source: chunk.source,
             score: match.score,
           },
         ];

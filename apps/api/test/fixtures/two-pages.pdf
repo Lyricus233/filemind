@@ -1,0 +1,49 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 2 /Kids [5 0 R 7 0 R] >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UCS2-H /DescendantFonts [4 0 R] >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 4 >> /DW 1000 >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 307 >>
+stream
+BT /F1 12 Tf 48 760 Td <7b2c4e00987597628bf4660eff1a59296c14988462a5670996e8ff0c51fa95e88bf75e2696e84f1e3002> Tj ET
+BT /F1 12 Tf 48 736 Td <0046006900720073007400200070006100670065003a0020007200610069006e00790020007700650061007400680065007200200061006e006400200075006d006200720065006c006c00610073002e> Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 8 0 R >>
+endobj
+8 0 obj
+<< /Length 335 >>
+stream
+BT /F1 12 Tf 48 760 Td <7b2c4e8c987597628bf4660eff1a6570636e5e937d225f1552a05feb67e58be24e0e65874ef668c07d223002> Tj ET
+BT /F1 12 Tf 48 736 Td <005300650063006f006e006400200070006100670065003a00200064006100740061006200610073006500200069006e0064006500780065007300200061006e0064002000660069006c00650020007300650061007200630068002e> Tj ET
+endstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000121 00000 n 
+0000000243 00000 n 
+0000000401 00000 n 
+0000000527 00000 n 
+0000000885 00000 n 
+0000001011 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R >>
+startxref
+1397
+%%EOF

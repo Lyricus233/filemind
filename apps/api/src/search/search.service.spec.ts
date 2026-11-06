@@ -13,6 +13,7 @@ describe('SearchService', () => {
     content: '🙂向量搜索与向量索引',
     startOffset: 400,
     endOffset: 410,
+    source: { format: 'pdf', page: 2 },
     file: { id: fileId, originalName: 'notes.txt', mimeType: 'text/plain' },
   };
 
@@ -49,6 +50,7 @@ describe('SearchService', () => {
           content: chunk.content,
           startOffset: 400,
           endOffset: 410,
+          source: chunk.source,
           matches: [
             { start: 1, end: 3 },
             { start: 6, end: 8 },

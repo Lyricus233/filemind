@@ -10,6 +10,8 @@ tracks remaining product capabilities rather than a percentage-complete estimate
 - SHA-256 content hashes, paginated duplicate detection and resumable legacy hash
   backfill.
 - Strict UTF-8 TXT/Markdown extraction, chunking and source offsets.
+- PDF/DOCX text extraction with PDF page locations and DOCX paragraph ranges in
+  chunk listings and retrieval results.
 - Separate BullMQ/Redis processing worker, bounded retries and job status APIs.
 - Literal chunk search with match ranges and pagination.
 - Configurable remote embeddings through the OpenAI SDK; Qwen is the current model.
@@ -23,8 +25,8 @@ tracks remaining product capabilities rather than a percentage-complete estimate
 
 1. **File/index management:** bulk indexing, index rebuilding,
    orphan cleanup and durable task/progress history.
-2. **More document formats:** PDF and DOCX first; then PPTX, spreadsheets and HTML
-   as needed. Preserve page/section/table locations and improve structural chunking.
+2. **More document formats:** PPTX, spreadsheets and HTML as needed. Improve
+   reading order, structural chunking and table/section locations.
    Add OCR for scanned documents.
 3. **Hybrid retrieval:** BM25 and Chinese tokenization, dense/sparse fusion with RRF,
    filename/title retrieval and reranking. Keep relevance evaluation alongside tuning.
@@ -35,6 +37,12 @@ tracks remaining product capabilities rather than a percentage-complete estimate
    Milvus's internal MinIO is not yet the original-file storage adapter.
 
 ## User-facing integrations
+
+The immediate next milestone is the first React/Vite demo in `apps/web`, now that
+multi-format indexing and source locations are available. Its first slice covers
+upload, file/processing status, source chunks and keyword/semantic search. Vector
+inspection can then be added to the same interface. Further backend operations
+and document-format work can continue alongside it.
 
 - React/Vite demonstration UI with restrained academic styling: file/chunk browser,
   indexing status, matched passages and scores, embedding metadata and optional

@@ -52,8 +52,9 @@ Poll the status URL until `state` is `completed` or `failed`. A completed result
 includes `indexed: true`, the embedding model, dimensions and chunk count. Reuse
 `POST /files/:id/process` to retry or reindex a file.
 
-Only UTF-8 `.txt` and `.md` extraction is currently supported. The existing upload
-limit remains 10 MiB.
+UTF-8 `.txt`/`.md`, text-based `.pdf` and `.docx` extraction are supported. The
+upload limit remains 10 MiB. See [PDF and DOCX processing](document-processing.md)
+for source locations, extraction limits and document test examples.
 
 ## Search by meaning
 
@@ -73,7 +74,8 @@ on the model and source content.
 
 The response includes `mode: "semantic"`, model, dimensions, `metric: "COSINE"`,
 `limit`, `returned` and `items`. Each item contains a chunk ID, file metadata, chunk
-index, original content, source offsets and cosine similarity `score`.
+index, original content, source offsets, nullable page/paragraph `source` and cosine
+similarity `score`.
 
 Higher scores mean greater similarity; they are not probabilities. This endpoint
 returns nearest neighbors without a relevance threshold, pagination or an exact

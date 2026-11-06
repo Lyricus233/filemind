@@ -23,6 +23,7 @@ describe('SemanticSearchService', () => {
     content: '出门记得带雨伞',
     startOffset: 0,
     endOffset: 7,
+    source: { format: 'docx', paragraphStart: 1, paragraphEnd: 2 },
     file: { id: fileId, originalName: 'weather.txt', mimeType: 'text/plain' },
   };
   const prisma = {
@@ -62,7 +63,13 @@ describe('SemanticSearchService', () => {
       dimensions: 3,
       returned: 1,
       items: [
-        { chunkId, content: chunk.content, file: chunk.file, score: 0.9 },
+        {
+          chunkId,
+          content: chunk.content,
+          file: chunk.file,
+          score: 0.9,
+          source: chunk.source,
+        },
       ],
     });
     expect(embeddings.embed).toHaveBeenCalledWith(['rainy weather']);

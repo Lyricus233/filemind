@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rmdir } from 'node:fs/promises';
+import { mkdtemp, readFile, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -34,6 +34,10 @@ interface Chunk {
   content: string;
   startOffset: number;
   endOffset: number;
+  source:
+    | { format: 'pdf'; page: number }
+    | { format: 'docx'; paragraphStart: number; paragraphEnd: number }
+    | null;
 }
 
 interface JobStatus {
@@ -188,10 +192,14 @@ describe('File retrieval pipeline (e2e)', () => {
     }
   }, 20000);
 
-  async function upload(content: Buffer, filename = 'e2e-notes.txt') {
+  async function upload(
+    content: Buffer,
+    filename = 'e2e-notes.txt',
+    contentType = 'text/plain',
+  ) {
     const response = await request(app!.getHttpServer())
       .post('/files')
-      .attach('file', content, { filename, contentType: 'text/plain' })
+      .attach('file', content, { filename, contentType })
       .expect(201);
     const fileId = response.body.id as string;
     expect(fileId).toMatch(/^[0-9a-f-]{36}$/u);
@@ -682,6 +690,102 @@ describe('File retrieval pipeline (e2e)', () => {
       .expect(200);
     expect(chunks.body.total).toBe(0);
   }, 15000);
+
+  it.each([
+    {
+      filename: 'two-pages.pdf',
+      mime: 'application/pdf',
+      source: { format: 'pdf', page: 2 },
+    },
+    {
+      filename: 'paragraphs.docx',
+      mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      source: { format: 'docx', paragraphStart: 1, paragraphEnd: 3 },
+    },
+  ])(
+    'indexes, locates and reprocesses actual document bytes: $filename',
+    async ({ filename, mime, source }) => {
+      const bytes = await readFile(
+        new URL(`./fixtures/${filename}`, import.meta.url),
+      );
+      const file = await upload(bytes, filename, mime);
+      const processed = await processFile(file.id);
+      expect(processed.state).toBe('completed');
+      const response = await request(app!.getHttpServer())
+        .get(`/files/${file.id}/chunks`)
+        .expect(200);
+      const chunks = response.body.items as Chunk[];
+      expect(chunks.length).toBe(filename.endsWith('.pdf') ? 2 : 1);
+      expect(
+        chunks.every((chunk) => chunk.source?.format === source.format),
+      ).toBe(true);
+      const literal = await request(app!.getHttpServer())
+        .get('/search')
+        .query({ q: '数据库索引', fileId: file.id })
+        .expect(200);
+      expect(literal.body.items).toHaveLength(1);
+      expect(literal.body.items[0].source).toEqual(source);
+      for (const match of literal.body.items[0].matches)
+        expect(
+          Array.from(literal.body.items[0].content as string)
+            .slice(match.start, match.end)
+            .join(''),
+        ).toBe('数据库索引');
+      const semantic = await request(app!.getHttpServer())
+        .get('/search/semantic')
+        .query({ q: '文件查询', fileId: file.id, limit: 10 })
+        .expect(200);
+      expect(semantic.body.returned).toBe(chunks.length);
+      for (const item of semantic.body.items) {
+        const original = chunks.find((chunk) => chunk.id === item.chunkId);
+        expect(original).toBeDefined();
+        expect(item.source).toEqual(original!.source);
+        expect(item.content).toBe(original!.content);
+      }
+      expect((await processFile(file.id)).state).toBe('completed');
+      const repeated = await request(app!.getHttpServer())
+        .get(`/files/${file.id}/chunks`)
+        .expect(200);
+      expect(repeated.body.items.map((chunk: Chunk) => chunk.id)).toEqual(
+        chunks.map((chunk) => chunk.id),
+      );
+      expect(repeated.body.items.map((chunk: Chunk) => chunk.source)).toEqual(
+        chunks.map((chunk) => chunk.source),
+      );
+      await request(app!.getHttpServer())
+        .delete(`/files/${file.id}`)
+        .expect(204);
+      expect(
+        await prisma!.fileChunk.count({ where: { fileId: file.id } }),
+      ).toBe(0);
+    },
+    120000,
+  );
+
+  it.each(['broken.pdf', 'broken.docx', 'empty.pdf', 'empty.docx'])(
+    'stops invalid or textless document jobs without calling embeddings: %s',
+    async (filename) => {
+      const bytes = filename.startsWith('empty')
+        ? await readFile(new URL(`./fixtures/${filename}`, import.meta.url))
+        : Buffer.from('not a valid document');
+      const file = await upload(bytes, filename);
+      const job = await processFile(file.id);
+      expect(job).toMatchObject({
+        state: 'failed',
+        attemptsMade: 1,
+        result: null,
+      });
+      expect(embeddingStub.embed).not.toHaveBeenCalled();
+      const detail = await request(app!.getHttpServer())
+        .get(`/files/${file.id}`)
+        .expect(200);
+      expect(detail.body.indexStatus).toBe('FAILED');
+      expect(
+        await prisma!.fileChunk.count({ where: { fileId: file.id } }),
+      ).toBe(0);
+    },
+    15000,
+  );
 
   it('deletes original content, chunks and current/historical vectors, and can be repeated', async () => {
     const file = await upload(

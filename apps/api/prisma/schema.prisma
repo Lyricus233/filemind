@@ -59,6 +59,7 @@ model FileChunk {
   content     String
   startOffset Int
   endOffset   Int
+  source      Json?
   createdAt   DateTime @default(now())
   file        File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
 

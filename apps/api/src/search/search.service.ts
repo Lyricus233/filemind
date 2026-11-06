@@ -31,6 +31,7 @@ export class SearchService {
             content: true,
             startOffset: true,
             endOffset: true,
+            source: true,
             file: {
               select: { id: true, originalName: true, mimeType: true },
             },
@@ -55,6 +56,7 @@ export class SearchService {
         content: chunk.content,
         startOffset: chunk.startOffset,
         endOffset: chunk.endOffset,
+        source: chunk.source,
         matches: findLiteralMatches(chunk.content, q),
       })),
       total,

@@ -21,7 +21,7 @@ export function extractText(originalName: string, buffer: Buffer): string {
 
   if (extension !== '.txt' && extension !== '.md') {
     throw new UnsupportedMediaTypeException(
-      'Only UTF-8 .txt and .md files are supported',
+      'Supported file formats are UTF-8 .txt, .md, text-based .pdf and .docx',
     );
   }
 

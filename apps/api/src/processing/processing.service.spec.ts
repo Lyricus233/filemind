@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { StorageService } from '../storage/storage.service.js';
 import { VectorStoreError } from '../vectors/vector-store-error.js';
 import { VectorStoreService } from '../vectors/vector-store.service.js';
+import { DocumentExtractorService } from './document-extractor.service.js';
 import { ProcessingService } from './processing.service.js';
 
 describe('ProcessingService', () => {
@@ -76,6 +77,7 @@ describe('ProcessingService', () => {
     const module = await Test.createTestingModule({
       providers: [
         ProcessingService,
+        DocumentExtractorService,
         { provide: PrismaService, useValue: prisma },
         { provide: StorageService, useValue: storage },
         { provide: EmbeddingsService, useValue: embeddings },

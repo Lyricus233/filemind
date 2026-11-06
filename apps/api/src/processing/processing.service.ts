@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 
 import {
   ConflictException,
@@ -13,13 +14,10 @@ import { IndexStatus, Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { StorageService } from '../storage/storage.service.js';
 import { VectorStoreService } from '../vectors/vector-store.service.js';
+import { splitDocument } from './document-chunking.js';
+import { DocumentExtractorService } from './document-extractor.service.js';
 import type { ListChunksQueryDto } from './dto/list-chunks-query.dto.js';
-import {
-  CHUNK_OVERLAP,
-  CHUNK_SIZE,
-  extractText,
-  splitText,
-} from './text-processing.js';
+import { CHUNK_OVERLAP, CHUNK_SIZE } from './text-processing.js';
 
 function getErrorCode(error: unknown): string | undefined {
   if (
@@ -43,6 +41,7 @@ export class ProcessingService {
     private readonly storage: StorageService,
     private readonly embeddings: EmbeddingsService,
     private readonly vectors: VectorStoreService,
+    private readonly extractor: DocumentExtractorService,
   ) {}
 
   async process(id: string, jobId: string = randomUUID()) {
@@ -60,7 +59,9 @@ export class ProcessingService {
           throw new NotFoundException('Stored file not found');
         throw error;
       }
-      const chunks = splitText(extractText(file.originalName, buffer));
+      const chunks = splitDocument(
+        await this.extractor.extract(file.originalName, buffer),
+      );
       const target = await this.vectors.ensureCollection();
       const embedded = await this.embeddings.embed(
         chunks.map((chunk) => chunk.content),
@@ -114,7 +115,8 @@ export class ProcessingService {
             const reusable =
               old?.content === chunk.content &&
               old.startOffset === chunk.startOffset &&
-              old.endOffset === chunk.endOffset;
+              old.endOffset === chunk.endOffset &&
+              isDeepStrictEqual(old.source ?? null, chunk.source ?? null);
             return {
               ...chunk,
               fileId: id,
@@ -203,6 +205,7 @@ export class ProcessingService {
             content: true,
             startOffset: true,
             endOffset: true,
+            source: true,
             createdAt: true,
           },
         }),
