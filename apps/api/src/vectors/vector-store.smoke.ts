@@ -65,6 +65,14 @@ export async function checkVectorStore(config: ConfigService) {
     assert.equal(filtered.length, 1);
     assert.equal(filtered[0].chunkId, secondChunk);
 
+    const reader = new VectorStoreService(config);
+    assert.deepEqual(await reader.readStoredChunk({ ...first, collection }), {
+      collection,
+      model: 'filemind-vector-check',
+      dimensions: 3,
+      vector: first.vector,
+    });
+
     await store.upsert([{ ...first, vector: [0, 0, 1] }]);
     const updated = await store.search([0, 0, 1], { fileId: firstFile });
     assert.equal(updated.length, 1);
@@ -74,6 +82,7 @@ export async function checkVectorStore(config: ConfigService) {
     assert.ok(Math.abs(oldVector[0].score) < 0.01);
 
     await store.deleteByFile(firstFile);
+    assert.equal(await reader.readStoredChunk({ ...first, collection }), null);
     assert.deepEqual(await store.search([0, 0, 1], { fileId: firstFile }), []);
     const retained = await store.search([0, 1, 0], { fileId: secondFile });
     assert.equal(retained.length, 1);
@@ -100,7 +109,14 @@ export async function checkVectorStore(config: ConfigService) {
 
   return {
     status: 'ok',
-    checks: ['upsert', 'cosine-search', 'file-filter', 'overwrite', 'delete'],
+    checks: [
+      'upsert',
+      'cosine-search',
+      'file-filter',
+      'read',
+      'overwrite',
+      'delete',
+    ],
     temporaryCollectionRemoved: true,
   };
 }

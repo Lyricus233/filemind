@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
@@ -40,5 +41,14 @@ export class ProcessingController {
     @Query() query: ListChunksQueryDto,
   ) {
     return this.processingService.findChunks(id, query);
+  }
+
+  @Get(':id/chunks/:chunkId/vector')
+  @Header('Cache-Control', 'no-store')
+  findChunkVector(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('chunkId', ParseUUIDPipe) chunkId: string,
+  ) {
+    return this.processingService.findChunkVector(id, chunkId);
   }
 }

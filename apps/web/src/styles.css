@@ -604,6 +604,79 @@ button:disabled {
   margin-top: 4px;
 }
 
+.vector-inspection {
+  margin-top: 12px;
+  border: 1px solid var(--wp-line);
+  border-radius: 7px;
+  background: var(--wp-reading-bg);
+}
+
+.wp-inspector .vector-inspection {
+  margin: 0 20px 16px;
+}
+
+.vector-inspection summary {
+  padding: 9px 12px;
+  color: var(--wp-blue);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.vector-inspection-body {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-top: 1px solid var(--wp-divider);
+}
+
+.vector-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: var(--wp-muted);
+  font-size: 12px;
+}
+
+.vector-facts dd {
+  color: var(--wp-ink);
+  font-family: var(--wp-mono);
+  overflow-wrap: anywhere;
+}
+
+.vector-preview {
+  margin: 0;
+  color: var(--wp-muted);
+  font-size: 12px;
+}
+
+.workbench-preview .vector-preview svg {
+  width: 100%;
+  height: 60px;
+  margin-bottom: 4px;
+}
+
+.vector-preview line {
+  stroke: var(--wp-control-line);
+}
+
+.vector-preview rect {
+  fill: var(--wp-blue);
+}
+
+.vector-preview rect[data-negative='true'] {
+  fill: var(--wp-muted);
+  opacity: 0.65;
+}
+
+.vector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--wp-muted);
+  font-size: 12px;
+}
+
 .job-progress {
   margin-bottom: 20px;
 }

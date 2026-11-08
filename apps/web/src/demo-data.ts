@@ -103,6 +103,27 @@ function matchesIn(content: string, query: string): MatchRange[] {
   return matches;
 }
 
+function exampleVector(content: string) {
+  const dimensions = 64;
+  const vector = Array<number>(dimensions).fill(0);
+  const codePoints = Array.from(content, (character) =>
+    character.codePointAt(0)!,
+  );
+  for (let index = 1; index < codePoints.length; index += 1) {
+    const pairHash =
+      Math.imul(codePoints[index - 1], 0x9e3779b1) ^
+      Math.imul(codePoints[index], 0x85ebca6b);
+    const bucket = (pairHash >>> 0) % dimensions;
+    vector[bucket] += pairHash < 0 ? -1 : 1;
+  }
+  const norm = Math.hypot(...vector) || 1;
+  return {
+    example: true as const,
+    dimensions,
+    vector: vector.map((value) => value / norm),
+  };
+}
+
 function search(
   params: URLSearchParams,
   semantic: boolean,
@@ -161,10 +182,16 @@ export function readDemo(path: string, method = 'GET') {
     );
   }
 
-  const [, id, view] =
-    /^\/files\/([^/]+)(?:\/(chunks))?$/u.exec(pathname) ?? [];
+  const [, id, view, chunkId] =
+    /^\/files\/([^/]+)(?:\/(chunks)(?:\/([^/]+)\/vector)?)?$/u.exec(pathname) ??
+    [];
   const file = files.find(({ record }) => record.id === id);
   if (!file) throw new Error('找不到此样本文档。');
+  if (chunkId) {
+    const chunk = file.chunks.find(({ id }) => id === chunkId);
+    if (!chunk) throw new Error('找不到此样本切片。');
+    return exampleVector(chunk.content);
+  }
   if (view === 'chunks') return paginate(file.chunks, page, limit);
   return {
     ...file.record,

@@ -16,6 +16,7 @@ import {
   sourceLabel,
 } from './api';
 import type { Chunk, FileRecord, Page, ProcessingJob } from './api';
+import { ChunkVectorInspection } from './ChunkVectorInspection';
 import { DEMO_MODE } from './demo';
 import { FileDeleteAction } from './FileDeleteAction';
 import {
@@ -391,6 +392,13 @@ function FileRecordPage({ id }: { id: string }) {
                         字符区间 [{chunk.startOffset}, {chunk.endOffset})
                       </p>
                       <PassageText content={chunk.content} />
+                      {file.data?.indexStatus === 'READY' && (
+                        <ChunkVectorInspection
+                          key={file.data.indexedAt}
+                          fileId={id}
+                          chunkId={chunk.id}
+                        />
+                      )}
                     </li>
                   ))}
                 </ol>

@@ -6,6 +6,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 
 import { EmbeddingError } from '../embeddings/embedding-error.js';
@@ -13,6 +14,7 @@ import { EmbeddingsService } from '../embeddings/embeddings.service.js';
 import { IndexStatus, Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { StorageService } from '../storage/storage.service.js';
+import { VectorStoreError } from '../vectors/vector-store-error.js';
 import { VectorStoreService } from '../vectors/vector-store.service.js';
 import { splitDocument } from './document-chunking.js';
 import { DocumentExtractorService } from './document-extractor.service.js';
@@ -241,6 +243,60 @@ export class ProcessingService {
       limit,
       totalPages: Math.ceil(total / limit),
     };
+  }
+
+  async findChunkVector(fileId: string, chunkId: string) {
+    const chunk = await this.prisma.fileChunk.findFirst({
+      where: { id: chunkId, fileId, file: { deletedAt: null } },
+      select: {
+        id: true,
+        fileId: true,
+        index: true,
+        file: {
+          select: {
+            indexStatus: true,
+            vectorCollection: true,
+            indexedAt: true,
+          },
+        },
+      },
+    });
+    if (!chunk) throw new NotFoundException('Chunk not found');
+    const { indexStatus, vectorCollection, indexedAt } = chunk.file;
+    if (indexStatus !== IndexStatus.READY || !vectorCollection)
+      throw new ConflictException('File does not have a ready vector index');
+
+    try {
+      const stored = await this.vectors.readStoredChunk({
+        chunkId: chunk.id,
+        fileId: chunk.fileId,
+        index: chunk.index,
+        collection: vectorCollection,
+      });
+      const current = await this.prisma.fileChunk.findFirst({
+        where: {
+          id: chunk.id,
+          fileId: chunk.fileId,
+          file: { deletedAt: null, indexStatus, vectorCollection, indexedAt },
+        },
+        select: { id: true },
+      });
+      if (!current)
+        throw new ConflictException('File index changed; retry the request');
+      if (!stored) throw new NotFoundException('Stored chunk vector not found');
+      return {
+        fileId: chunk.fileId,
+        chunkId: chunk.id,
+        index: chunk.index,
+        ...stored,
+      };
+    } catch (error) {
+      if (error instanceof VectorStoreError)
+        throw new ServiceUnavailableException(
+          'Could not read the stored vector; check Milvus',
+        );
+      throw error;
+    }
   }
 
   async recordTerminalFailure(id: string, jobId: string) {

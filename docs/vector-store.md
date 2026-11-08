@@ -72,7 +72,7 @@ Expected output:
 ```json
 {
   "status": "ok",
-  "checks": ["upsert", "cosine-search", "file-filter", "overwrite", "delete"],
+  "checks": ["upsert", "cosine-search", "file-filter", "read", "overwrite", "delete"],
   "temporaryCollectionRemoved": true
 }
 ```
@@ -121,6 +121,12 @@ The collection description records the FileMind schema version, model and vector
 dimensions. A mismatch stops initialization. To change model or vector dimensions,
 use a new collection and re-embed the source chunks. Equal vector dimensions alone
 do not make embeddings from different models comparable.
+
+`GET /files/:id/chunks/:chunkId/vector` returns the stored coefficients and the
+collection's model and dimensions for a chunk from a ready file index. In the
+workbench, open **查看切片向量** beside a result or file passage to preview the
+first 32 dimensions and copy the full vector as JSON. Inspection reads the
+file's recorded collection and uses no embedding API calls.
 
 The check command's synthetic-vector test verifies Milvus independently. Use
 `pnpm run embeddings:check -- "text"` to verify the real embedding provider.

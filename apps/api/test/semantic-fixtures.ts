@@ -23,6 +23,21 @@ export class FixtureVectorStore {
   async deleteFromCollection(fileId: string, collection: string) {
     if (collection === this.collection) await this.deleteByFile(fileId);
   }
+  async readStoredChunk({
+    chunkId,
+    fileId,
+    index,
+    collection,
+  }: Omit<ChunkVector, 'vector'> & { collection: string }) {
+    const row = this.rows.get(chunkId);
+    if (
+      collection !== this.collection ||
+      row?.fileId !== fileId ||
+      row.index !== index
+    )
+      return null;
+    return { ...(await this.ensureCollection()), vector: row.vector };
+  }
   async search(
     vector: readonly number[],
     options: {

@@ -35,6 +35,8 @@ workbench into `dist` with bundled sample documents and hash-based routing, so a
 static host can serve the output directly.
 
 Visitors can run arbitrary keyword searches, filter the sample library, open
-passages and download the sample originals. Semantic search demonstrates a
-preset query and curated results. The demo runs in the browser and has no API
-or credentials to configure.
+passages and download the sample originals. The vector inspector previews the
+first 32 dimensions of a 64-dimensional vector computed from adjacent characters
+in each sample passage. Visitors can copy the full vector. Semantic search
+demonstrates a preset query and curated results. The demo runs in the browser
+and has no API or credentials to configure.

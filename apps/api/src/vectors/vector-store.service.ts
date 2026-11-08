@@ -26,6 +26,14 @@ export interface VectorMatch {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const WRITE_BATCH_SIZE = 128;
 
+function parseCollectionDescription(description: string): unknown {
+  try {
+    return JSON.parse(description);
+  } catch {
+    return undefined;
+  }
+}
+
 @Injectable()
 export class VectorStoreService implements OnModuleDestroy {
   private client?: MilvusClient;
@@ -191,10 +199,99 @@ export class VectorStoreService implements OnModuleDestroy {
 
   async deleteFromCollection(fileId: string, collection: string) {
     this.validateId(fileId);
+    await this.withExistingCollection(collection, async (client) => {
+      const result = await client.delete({
+        collection_name: collection,
+        filter: `file_id == ${JSON.stringify(fileId)}`,
+      });
+      assertMilvusSuccess(result.status);
+    });
+  }
+
+  async readStoredChunk({
+    chunkId,
+    fileId,
+    index,
+    collection,
+  }: Omit<ChunkVector, 'vector'> & { collection: string }) {
+    this.validateId(chunkId);
+    this.validateId(fileId);
+    return this.withExistingCollection(collection, async (client) => {
+      const described = await client.describeCollection({
+        collection_name: collection,
+        cache: false,
+      });
+      assertMilvusSuccess(described.status);
+      const metadata = parseCollectionDescription(described.schema.description);
+      const field = described.schema.fields.find(
+        ({ name }) => name === 'embedding',
+      );
+      const dimensions = Number(
+        field?.type_params.find(({ key }) => key === 'dim')?.value,
+      );
+      if (
+        !metadata ||
+        typeof metadata !== 'object' ||
+        !('application' in metadata) ||
+        metadata.application !== 'filemind' ||
+        !('schemaVersion' in metadata) ||
+        metadata.schemaVersion !== 1 ||
+        !('model' in metadata) ||
+        typeof metadata.model !== 'string' ||
+        !metadata.model.trim() ||
+        !('dimensions' in metadata) ||
+        metadata.dimensions !== dimensions ||
+        !Number.isInteger(dimensions) ||
+        dimensions < 2 ||
+        dimensions > 32768 ||
+        field?.data_type !== 'FloatVector' ||
+        described.consistency_level !== 'Strong'
+      ) {
+        throw new VectorStoreError(
+          'Milvus collection does not describe a FileMind vector index',
+          'schema_mismatch',
+        );
+      }
+
+      const result = await client.get({
+        collection_name: collection,
+        ids: [chunkId],
+        output_fields: ['chunk_id', 'file_id', 'chunk_index', 'embedding'],
+      });
+      assertMilvusSuccess(result.status);
+      if (result.data.length === 0) return null;
+      const [row] = result.data;
+      const vector: unknown[] = Array.isArray(row.embedding)
+        ? Array.from(row.embedding)
+        : [];
+      if (
+        result.data.length !== 1 ||
+        row.chunk_id !== chunkId ||
+        row.file_id !== fileId ||
+        row.chunk_index !== index ||
+        vector.length !== dimensions ||
+        !vector.every(
+          (value): value is number =>
+            typeof value === 'number' && Number.isFinite(value),
+        )
+      ) {
+        throw new VectorStoreError(
+          'Milvus returned an invalid chunk vector',
+          'invalid_response',
+        );
+      }
+      return { collection, model: metadata.model, dimensions, vector };
+    });
+  }
+
+  private async withExistingCollection<T>(
+    collection: string,
+    action: (client: MilvusClient) => Promise<T>,
+  ): Promise<T | null> {
     assertCollectionName(collection);
     if (this.closed)
       throw new VectorStoreError('Vector store has been closed', 'unavailable');
-    await this.operation(async () => {
+    return this.operation(async () => {
       const client = new MilvusClient(milvusClientConfig(this.config));
       try {
         await client.connectPromise;
@@ -202,13 +299,9 @@ export class VectorStoreService implements OnModuleDestroy {
           collection_name: collection,
         });
         assertMilvusSuccess(exists.status);
-        if (!exists.value) return;
+        if (!exists.value) return null;
         await this.load(client, collection);
-        const result = await client.delete({
-          collection_name: collection,
-          filter: `file_id == ${JSON.stringify(fileId)}`,
-        });
-        assertMilvusSuccess(result.status);
+        return await action(client);
       } finally {
         await client.closeConnection();
       }

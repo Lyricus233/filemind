@@ -17,6 +17,7 @@ implemented features and remaining product capabilities.
 - Configurable remote embeddings through the OpenAI SDK; Qwen is the current model.
 - Milvus vector storage, cosine search, model/dimension checks and file filters.
 - Text indexing lifecycle and semantic search returning original source passages.
+- On-demand inspection of stored chunk vectors in the web workbench.
 - Retryable file deletion across local storage, PostgreSQL and tracked Milvus
   collections, with processing/deletion coordination.
 - Unit, API, real Milvus and complete retrieval integration tests.
@@ -39,10 +40,9 @@ implemented features and remaining product capabilities.
 ## User-facing integrations
 
 The first [React/Vite demo](../apps/web/README.md) covers upload, processing status,
-source chunks, and keyword and semantic search. Vector inspection can be added to
-the same interface.
+source chunks, keyword and semantic search, and stored vector inspection.
 
-- Vector inspection and optional projections for search results and source chunks.
+- Optional projections for comparing multiple search results or source chunks.
 - Local-folder ingestion and incremental synchronization. Browser uploads and
   scanning arbitrary host folders need different ingestion mechanisms.
 - Bot/platform adapters that call the same indexing and retrieval APIs.

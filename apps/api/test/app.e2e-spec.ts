@@ -564,6 +564,30 @@ describe('File retrieval pipeline (e2e)', () => {
       ).toBe(chunk.content);
     }
 
+    const vectorPath = `/files/${file.id}/chunks/${chunks[0].id}/vector`;
+    const previousEmbeddingCalls = embeddingStub.embed.mock.calls.length;
+    const stored = await request(app!.getHttpServer())
+      .get(vectorPath)
+      .expect('Cache-Control', 'no-store')
+      .expect(200);
+    const dimensions = realEmbeddings
+      ? Number(process.env.EMBEDDING_DIMENSIONS)
+      : 3;
+    expect(stored.body).toMatchObject({
+      fileId: file.id,
+      chunkId: chunks[0].id,
+      index: chunks[0].index,
+      collection,
+      model: realEmbeddings ? process.env.EMBEDDING_MODEL : FIXTURE_MODEL,
+      dimensions,
+    });
+    expect(stored.body.vector).toHaveLength(dimensions);
+    if (!realEmbeddings) expect(stored.body.vector).toEqual([0, 0, 1]);
+    expect(embeddingStub.embed.mock.calls).toHaveLength(previousEmbeddingCalls);
+    await request(app!.getHttpServer())
+      .get(`/files/${randomUUID()}/chunks/${chunks[0].id}/vector`)
+      .expect(404);
+
     for (const q of ['向量', '100%', 'a_b', 'C:\\notes\\file.md']) {
       const search = await request(app!.getHttpServer())
         .get('/search')

@@ -20,6 +20,7 @@ import { Link, useSearchParams } from 'react-router';
 
 import { PAGE_SIZE, filePath, pageNumber, sourceLabel } from './api';
 import type { FileRecord, Page, SearchResponse } from './api';
+import { ChunkVectorInspection } from './ChunkVectorInspection';
 import { DEMO_KEYWORD, DEMO_MODE, DEMO_QUESTION } from './demo';
 import { DocumentIcon, PassageText, fileType, jumpToPageAnchor } from './ui';
 import { useResource } from './use-resource';
@@ -350,6 +351,7 @@ function Inspector({ hit }: { hit?: Hit }) {
               matches={'matches' in hit ? hit.matches : undefined}
             />
           </div>
+          <ChunkVectorInspection fileId={hit.file.id} chunkId={hit.chunkId} />
           <div className="wp-source-footer">
             <Link to={`${filePath(hit.file.id)}?chunk=${hit.index + 1}`}>
               打开文件详情 <ArrowRight aria-hidden="true" />
