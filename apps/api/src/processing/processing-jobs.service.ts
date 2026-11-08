@@ -13,6 +13,7 @@ import {
 import { IndexStatus } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
+  PROCESSING_PHASES,
   PROCESSING_QUEUE,
   PROCESS_FILE_JOB,
   type ProcessingQueue,
@@ -82,11 +83,39 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
         'Processing queue returned no job ID',
       );
     }
+    if (file.indexJobId !== job.id) {
+      await this.prisma.file.updateMany({
+        where: {
+          id: fileId,
+          deletedAt: null,
+          indexJobId: file.indexJobId ?? null,
+        },
+        data: { indexJobId: job.id },
+      });
+    }
     return {
       fileId,
       jobId: job.id,
       statusUrl: `/files/${fileId}/processing-jobs/${job.id}`,
     };
+  }
+
+  async attachStatus<T extends { id: string; indexJobId: string | null }>(
+    file: T,
+  ) {
+    try {
+      const activeId = await this.queue.getDeduplicationJobId(file.id);
+      const jobId = activeId ?? file.indexJobId;
+      const job = jobId ? await this.queue.getJob(jobId) : undefined;
+      if (job?.id && job.data.fileId === file.id) {
+        const state = await job.getState();
+        if (state !== 'unknown')
+          return { ...file, processingJob: { jobId: job.id, state } };
+      }
+    } catch {
+      // The file library remains available when Redis cannot be reached.
+    }
+    return { ...file, processingJob: null };
   }
 
   async releaseAbandoned(file: {
@@ -151,11 +180,19 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
       job = refreshedJob;
     }
 
+    const progress = job.progress;
+    const phase =
+      typeof progress === 'object' && progress !== null && 'phase' in progress
+        ? (PROCESSING_PHASES.find(
+            (candidate) => candidate === progress.phase,
+          ) ?? null)
+        : null;
     return {
       fileId,
       jobId,
       state,
       attemptsMade: job.attemptsMade,
+      phase,
       result: state === 'completed' ? job.returnvalue : null,
       error: state === 'failed' ? job.failedReason : null,
     };

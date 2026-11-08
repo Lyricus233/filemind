@@ -6,6 +6,7 @@ import { Test } from '@nestjs/testing';
 import { parse } from 'content-disposition';
 import request from 'supertest';
 
+import { ProcessingJobsService } from '../processing/processing-jobs.service.js';
 import { FileDeletionService } from './file-deletion.service.js';
 import { FilesController } from './files.controller.js';
 import { FilesService } from './files.service.js';
@@ -25,6 +26,7 @@ describe('FilesController download', () => {
       controllers: [FilesController],
       providers: [
         { provide: FileDeletionService, useValue: deletion },
+        { provide: ProcessingJobsService, useValue: {} },
         {
           provide: FilesService,
           useValue: filesService,

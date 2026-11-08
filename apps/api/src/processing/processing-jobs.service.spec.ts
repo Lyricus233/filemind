@@ -14,7 +14,13 @@ import {
 describe('ProcessingJobsService', () => {
   const fileId = 'e71d88f0-9b85-48bc-8cac-c9b28ac19a2f';
   const jobId = '2bd23a57-6d56-4cbb-8986-9c24acdc1d89';
-  const queue = { add: vi.fn(), getJob: vi.fn(), on: vi.fn(), off: vi.fn() };
+  const queue = {
+    add: vi.fn(),
+    getDeduplicationJobId: vi.fn(),
+    getJob: vi.fn(),
+    on: vi.fn(),
+    off: vi.fn(),
+  };
   const prisma = { file: { findUnique: vi.fn(), updateMany: vi.fn() } };
   let service: ProcessingJobsService;
 
@@ -55,6 +61,40 @@ describe('ProcessingJobsService', () => {
     const existingId = '85595c9d-2b47-4d7f-9309-bb93a6a3f894';
     queue.add.mockResolvedValue({ id: existingId });
     expect(await service.enqueue(fileId)).toMatchObject({ jobId: existingId });
+  });
+
+  it('reports a queued job in the file library before indexing has started', async () => {
+    queue.getDeduplicationJobId.mockResolvedValue(jobId);
+    queue.getJob.mockResolvedValue({
+      id: jobId,
+      data: { fileId },
+      getState: vi.fn().mockResolvedValue('waiting'),
+    });
+    expect(
+      await service.attachStatus({ id: fileId, indexJobId: null }),
+    ).toMatchObject({
+      processingJob: { jobId, state: 'waiting' },
+    });
+  });
+
+  it('returns the last failed phase after the job leaves active deduplication', async () => {
+    queue.getDeduplicationJobId.mockResolvedValue(null);
+    queue.getJob.mockResolvedValue({
+      id: jobId,
+      data: { fileId },
+      getState: vi.fn().mockResolvedValue('failed'),
+      progress: { phase: 'extracting' },
+      failedReason: 'job stalled more than allowable limit',
+    });
+    expect(
+      await service.attachStatus({ id: fileId, indexJobId: jobId }),
+    ).toMatchObject({
+      processingJob: { jobId, state: 'failed' },
+    });
+    expect(await service.findOne(fileId, jobId)).toMatchObject({
+      state: 'failed',
+      phase: 'extracting',
+    });
   });
 
   it('uses the database UUID spelling for queue deduplication', async () => {

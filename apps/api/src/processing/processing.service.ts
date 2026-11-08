@@ -17,6 +17,7 @@ import { VectorStoreService } from '../vectors/vector-store.service.js';
 import { splitDocument } from './document-chunking.js';
 import { DocumentExtractorService } from './document-extractor.service.js';
 import type { ListChunksQueryDto } from './dto/list-chunks-query.dto.js';
+import type { ProcessingPhase } from './processing-queue.types.js';
 import { CHUNK_OVERLAP, CHUNK_SIZE } from './text-processing.js';
 
 function getErrorCode(error: unknown): string | undefined {
@@ -44,7 +45,18 @@ export class ProcessingService {
     private readonly extractor: DocumentExtractorService,
   ) {}
 
-  async process(id: string, jobId: string = randomUUID()) {
+  async process(
+    id: string,
+    jobId: string = randomUUID(),
+    options?: {
+      onProgress: (phase: ProcessingPhase) => Promise<void>;
+      extractChunks: (
+        originalName: string,
+        buffer: Buffer,
+      ) => Promise<ReturnType<typeof splitDocument>>;
+    },
+  ) {
+    await options?.onProgress('reading');
     const file = await this.findFile(id);
     id = file.id;
     let claimed = false;
@@ -59,9 +71,13 @@ export class ProcessingService {
           throw new NotFoundException('Stored file not found');
         throw error;
       }
-      const chunks = splitDocument(
-        await this.extractor.extract(file.originalName, buffer),
-      );
+      await options?.onProgress('extracting');
+      const chunks = options
+        ? await options.extractChunks(file.originalName, buffer)
+        : splitDocument(
+            await this.extractor.extract(file.originalName, buffer),
+          );
+      await options?.onProgress('embedding');
       const target = await this.vectors.ensureCollection();
       const embedded = await this.embeddings.embed(
         chunks.map((chunk) => chunk.content),
@@ -77,6 +93,7 @@ export class ProcessingService {
         );
       }
 
+      await options?.onProgress('indexing');
       const data = await this.prisma.$transaction(
         async (tx) => {
           const claim = await tx.file.updateMany({
@@ -224,6 +241,18 @@ export class ProcessingService {
       limit,
       totalPages: Math.ceil(total / limit),
     };
+  }
+
+  async recordTerminalFailure(id: string, jobId: string) {
+    await this.prisma.file.updateMany({
+      where: {
+        id,
+        indexJobId: jobId,
+        deletedAt: null,
+        indexStatus: { in: [IndexStatus.PENDING, IndexStatus.PROCESSING] },
+      },
+      data: { indexStatus: IndexStatus.FAILED },
+    });
   }
 
   private async findFile(id: string) {

@@ -5,6 +5,14 @@ import type { ProcessingService } from './processing.service.js';
 export const PROCESSING_QUEUE = 'file-processing';
 export const PROCESS_FILE_JOB = 'extract-text';
 
+export const PROCESSING_PHASES = [
+  'reading',
+  'extracting',
+  'embedding',
+  'indexing',
+] as const;
+export type ProcessingPhase = (typeof PROCESSING_PHASES)[number];
+
 export interface ProcessingJobData {
   fileId: string;
 }

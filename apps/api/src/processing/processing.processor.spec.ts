@@ -41,7 +41,10 @@ describe('ProcessingProcessor', () => {
     const result = { fileId, chunkCount: 3, chunkSize: 500, overlap: 100 };
     processing.process.mockResolvedValue(result);
     await expect(processor.process(job)).resolves.toEqual(result);
-    expect(processing.process).toHaveBeenCalledWith(fileId, job.id);
+    expect(processing.process).toHaveBeenCalledWith(fileId, job.id, {
+      onProgress: expect.any(Function),
+      extractChunks: expect.any(Function),
+    });
   });
 
   it.each([

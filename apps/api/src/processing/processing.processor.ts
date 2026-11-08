@@ -4,6 +4,7 @@ import { type Job, UnrecoverableError } from 'bullmq';
 
 import { EmbeddingError } from '../embeddings/embedding-error.js';
 import { VectorStoreError } from '../vectors/vector-store-error.js';
+import { extractChunksInWorker } from './document-extraction.worker.js';
 import {
   PROCESSING_QUEUE,
   PROCESS_FILE_JOB,
@@ -29,7 +30,10 @@ export class ProcessingProcessor extends WorkerHost {
 
     try {
       if (!job.id) throw new UnrecoverableError('Processing job ID is missing');
-      return await this.processingService.process(job.data.fileId, job.id);
+      return await this.processingService.process(job.data.fileId, job.id, {
+        onProgress: (phase) => job.updateProgress({ phase }),
+        extractChunks: extractChunksInWorker,
+      });
     } catch (error) {
       if (error instanceof UnrecoverableError) throw error;
       if (
@@ -70,9 +74,30 @@ export class ProcessingProcessor extends WorkerHost {
   }
 
   @OnWorkerEvent('failed')
-  onFailed(job: Job | undefined, error: Error) {
+  async onFailed(job: Job<ProcessingJobData> | undefined, error: Error) {
     this.logger.warn(
       `Processing job ${job?.id ?? 'unknown'} failed: ${error.message}`,
+    );
+    if (!job?.id || job.name !== PROCESS_FILE_JOB) return;
+    try {
+      if ((await job.getState()) === 'failed') {
+        await this.processingService.recordTerminalFailure(
+          job.data.fileId,
+          job.id,
+        );
+      }
+    } catch (cause) {
+      this.logger.warn(
+        `Could not record terminal failure for job ${job.id}`,
+        cause,
+      );
+    }
+  }
+
+  @OnWorkerEvent('stalled')
+  onStalled(jobId: string) {
+    this.logger.warn(
+      `Processing job ${jobId} lost its worker lock and was requeued`,
     );
   }
 }

@@ -206,6 +206,7 @@ export class FilesService {
       createdAt: file.createdAt,
       updatedAt: file.updatedAt,
       indexStatus: file.indexStatus,
+      indexJobId: file.indexJobId,
       indexedAt: file.indexedAt,
     };
   }

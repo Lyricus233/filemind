@@ -17,6 +17,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { create as createContentDisposition } from 'content-disposition';
 import { memoryStorage } from 'multer';
 
+import { ProcessingJobsService } from '../processing/processing-jobs.service.js';
 import { ListDuplicatesQueryDto } from './dto/list-duplicates-query.dto.js';
 import { ListFilesQueryDto } from './dto/list-files-query.dto.js';
 import { FileDeletionService } from './file-deletion.service.js';
@@ -29,6 +30,7 @@ export class FilesController {
   constructor(
     private readonly filesService: FilesService,
     private readonly deletion: FileDeletionService,
+    private readonly jobs: ProcessingJobsService,
   ) {}
 
   @Delete(':id')
@@ -61,8 +63,14 @@ export class FilesController {
   }
 
   @Get()
-  findAll(@Query() query: ListFilesQueryDto) {
-    return this.filesService.findAll(query);
+  async findAll(@Query() query: ListFilesQueryDto) {
+    const page = await this.filesService.findAll(query);
+    return {
+      ...page,
+      items: await Promise.all(
+        page.items.map((file) => this.jobs.attachStatus(file)),
+      ),
+    };
   }
 
   @Get(':id/download')
@@ -87,7 +95,7 @@ export class FilesController {
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.filesService.findOne(id);
+  async findOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.jobs.attachStatus(await this.filesService.findOne(id));
   }
 }

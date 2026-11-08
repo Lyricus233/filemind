@@ -1,7 +1,7 @@
 # FileMind development roadmap
 
-FileMind is currently a backend with a working text retrieval pipeline. This list
-tracks remaining product capabilities rather than a percentage-complete estimate.
+FileMind has a working retrieval API and a local web workbench. This list tracks
+implemented features and remaining product capabilities.
 
 ## Implemented
 
@@ -38,15 +38,11 @@ tracks remaining product capabilities rather than a percentage-complete estimate
 
 ## User-facing integrations
 
-The immediate next milestone is the first React/Vite demo in `apps/web`, now that
-multi-format indexing and source locations are available. Its first slice covers
-upload, file/processing status, source chunks and keyword/semantic search. Vector
-inspection can then be added to the same interface. Further backend operations
-and document-format work can continue alongside it.
+The first [React/Vite demo](../apps/web/README.md) covers upload, processing status,
+source chunks, and keyword and semantic search. Vector inspection can be added to
+the same interface.
 
-- React/Vite demonstration UI with restrained academic styling: file/chunk browser,
-  indexing status, matched passages and scores, embedding metadata and optional
-  vector projections. The backend remains usable independently of this UI.
+- Vector inspection and optional projections for search results and source chunks.
 - Local-folder ingestion and incremental synchronization. Browser uploads and
   scanning arbitrary host folders need different ingestion mechanisms.
 - Bot/platform adapters that call the same indexing and retrieval APIs.

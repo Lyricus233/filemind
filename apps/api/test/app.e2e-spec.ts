@@ -42,6 +42,7 @@ interface Chunk {
 
 interface JobStatus {
   state: string;
+  phase: string | null;
   attemptsMade: number;
   result: { chunkCount: number } | null;
   error: string | null;
@@ -221,7 +222,10 @@ describe('File retrieval pipeline (e2e)', () => {
       statusUrl: string;
     };
     expect(statusUrl).toBe(`/files/${fileId}/processing-jobs/${jobId}`);
+    return waitForJob(jobId, statusUrl);
+  }
 
+  async function waitForJob(jobId: string, statusUrl: string) {
     const deadline = Date.now() + 60000;
     while (Date.now() < deadline) {
       const status = await request(app!.getHttpServer())
@@ -241,6 +245,45 @@ describe('File retrieval pipeline (e2e)', () => {
       .expect(200);
     expect(result.body).toEqual({ status: 'ok', service: 'filemind-api' });
   });
+
+  it('recovers a queued job from a fresh file read and reports its indexing phase', async () => {
+    const file = await upload(
+      await readFile(new URL('./fixtures/two-pages.pdf', import.meta.url)),
+      'progress-check.pdf',
+      'application/pdf',
+    );
+    await queue!.pause();
+    const response = await request(app!.getHttpServer())
+      .post(`/files/${file.id}/process`)
+      .expect(202)
+      .catch(async (error) => {
+        await queue!.resume();
+        throw error;
+      });
+    const { jobId, statusUrl } = response.body as {
+      jobId: string;
+      statusUrl: string;
+    };
+    try {
+      const list = await request(app!.getHttpServer())
+        .get('/files')
+        .query({ name: 'progress-check.pdf' })
+        .expect(200);
+      const detail = await request(app!.getHttpServer())
+        .get(`/files/${file.id}`)
+        .expect(200);
+      for (const record of [list.body.items[0], detail.body]) {
+        expect(record.processingJob.jobId).toBe(jobId);
+        expect(['waiting', 'paused']).toContain(record.processingJob.state);
+      }
+    } finally {
+      await queue!.resume();
+    }
+    expect(await waitForJob(jobId, statusUrl)).toMatchObject({
+      state: 'completed',
+      phase: 'indexing',
+    });
+  }, 30000);
 
   it('finds byte-identical uploads across filenames, paginates and excludes deleted copies', async () => {
     const bytes = Buffer.from('Exact content for duplicate detection.\r\n');
