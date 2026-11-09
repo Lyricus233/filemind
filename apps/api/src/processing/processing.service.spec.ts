@@ -1,6 +1,7 @@
 import {
   ConflictException,
   NotFoundException,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -34,13 +35,14 @@ describe('ProcessingService', () => {
   };
 
   const prisma = {
-    file: { findUnique: vi.fn(), updateMany: vi.fn() },
+    file: { findUnique: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
     $transaction: vi.fn(),
   };
 
   const storage = { read: vi.fn() };
   const embeddings = { embed: vi.fn() };
   const vectors = {
+    target: vi.fn(),
     ensureCollection: vi.fn(),
     deleteByFile: vi.fn(),
     upsert: vi.fn(),
@@ -60,6 +62,7 @@ describe('ProcessingService', () => {
     transaction.fileVectorIndex.createMany.mockResolvedValue({ count: 1 });
     transaction.fileChunk.findMany.mockResolvedValue([]);
     vectors.ensureCollection.mockResolvedValue(target);
+    vectors.target.mockReturnValue(target);
     vectors.deleteByFile.mockResolvedValue(undefined);
     vectors.upsert.mockResolvedValue({ count: 1 });
     embeddings.embed.mockResolvedValue({
@@ -86,6 +89,62 @@ describe('ProcessingService', () => {
     }).compile();
 
     service = module.get(ProcessingService);
+  });
+
+  it('paginates rebuild candidates by ID even when a previous candidate leaves the list', async () => {
+    const pending = {
+      id: '11111111-1111-4111-8111-111111111111',
+      originalName: 'pending.txt',
+      indexStatus: 'PENDING',
+      vectorCollection: null,
+    };
+    const stale = {
+      id: '22222222-2222-4222-8222-222222222222',
+      originalName: 'stale.txt',
+      indexStatus: 'READY',
+      vectorCollection: 'old_chunks',
+    };
+    prisma.file.findMany.mockResolvedValueOnce([pending, stale]);
+    const first = await service.findRebuildCandidates({ limit: 1 });
+    expect(first).toEqual({ target, items: [pending], nextCursor: pending.id });
+
+    prisma.file.findMany.mockResolvedValueOnce([stale]);
+    await expect(
+      service.findRebuildCandidates({ cursor: first.nextCursor!, limit: 1 }),
+    ).resolves.toEqual({ target, items: [stale], nextCursor: null });
+    expect(prisma.file.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: {
+          id: { gt: pending.id },
+          deletedAt: null,
+          storageKey: { not: null },
+          OR: [
+            { indexStatus: { in: ['PENDING', 'FAILED'] } },
+            {
+              indexStatus: 'READY',
+              OR: [
+                { vectorCollection: null },
+                { vectorCollection: { not: target.collection } },
+              ],
+            },
+          ],
+        },
+        orderBy: { id: 'asc' },
+        take: 2,
+      }),
+    );
+    expect(vectors.ensureCollection).not.toHaveBeenCalled();
+    expect(embeddings.embed).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 before reading candidates when the vector target is invalid', async () => {
+    vectors.target.mockImplementation(() => {
+      throw new VectorStoreError('Invalid target', 'configuration');
+    });
+    await expect(
+      service.findRebuildCandidates({ limit: 20 }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(prisma.file.findMany).not.toHaveBeenCalled();
   });
 
   it('extracts content and writes chunks associated with the source file', async () => {

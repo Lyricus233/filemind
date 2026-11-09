@@ -13,6 +13,7 @@ import {
 
 import { BatchProcessingDto } from './dto/batch-processing.dto.js';
 import { ListChunksQueryDto } from './dto/list-chunks-query.dto.js';
+import { ListRebuildCandidatesQueryDto } from './dto/list-rebuild-candidates-query.dto.js';
 import { ProcessingJobsService } from './processing-jobs.service.js';
 import { ProcessingService } from './processing.service.js';
 
@@ -22,6 +23,12 @@ export class ProcessingController {
     private readonly processingService: ProcessingService,
     private readonly processingJobsService: ProcessingJobsService,
   ) {}
+
+  @Get('index/rebuild-candidates')
+  @Header('Cache-Control', 'no-store')
+  findRebuildCandidates(@Query() query: ListRebuildCandidatesQueryDto) {
+    return this.processingService.findRebuildCandidates(query);
+  }
 
   @Post('process')
   @HttpCode(HttpStatus.OK)

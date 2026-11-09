@@ -45,7 +45,11 @@ export class VectorStoreService implements OnModuleDestroy {
 
   async ensureCollection() {
     await this.connection();
-    const { collection, model, dimensions } = this.settings!;
+    return this.target();
+  }
+
+  target() {
+    const { collection, model, dimensions } = this.readSettings();
     return { collection, model, dimensions };
   }
 

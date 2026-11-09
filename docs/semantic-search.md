@@ -121,6 +121,38 @@ Changing the model/embedding space requires a new collection and reindexing file
 collections. Files pending physical cleanup are hidden from retrieval. See
 [File deletion and index cleanup](file-lifecycle.md) for retry and concurrency behavior.
 
+## Rebuild after switching collections
+
+After changing the model or dimensions, give the new embedding space its own
+`MILVUS_COLLECTION`. Restart the API and workers with the same configuration
+before submitting a rebuild. Files still pointing to the old collection become
+searchable in the new one as their replacement jobs finish.
+
+`GET /files/index/rebuild-candidates` reads PostgreSQL and returns the configured
+target and the visible files with stored content that are pending, failed, or
+ready in a different or missing collection. A file marked `PROCESSING` is skipped.
+The response does not check whether a Milvus collection or its vectors exist.
+The `limit` defaults to 20 and accepts 1–20. The first request omits `cursor`.
+
+```powershell
+$api = 'http://127.0.0.1:3000'
+$plan = Invoke-RestMethod -NoProxy "$api/files/index/rebuild-candidates"
+$plan.target
+$plan.items | Format-Table id, originalName, indexStatus, vectorCollection
+```
+
+After checking the target and reviewing a nonempty page, submit its file IDs:
+
+```powershell
+$body = @{ fileIds = @($plan.items.id) } | ConvertTo-Json -Compress
+Invoke-RestMethod -NoProxy -Method Post -Uri "$api/files/process" -ContentType 'application/json' -Body $body
+```
+
+Inspect the returned submission results and poll their `statusUrl` values. If
+`nextCursor` is present, fetch the next page with `?cursor=<nextCursor>`. The list
+reflects current database state as jobs complete. Start again without a cursor to
+check for files that failed or became eligible during the pass.
+
 ## Test boundaries
 
 | Command                  | Dependencies and coverage                                              |

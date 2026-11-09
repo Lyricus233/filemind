@@ -19,6 +19,7 @@ import { VectorStoreService } from '../vectors/vector-store.service.js';
 import { splitDocument } from './document-chunking.js';
 import { DocumentExtractorService } from './document-extractor.service.js';
 import type { ListChunksQueryDto } from './dto/list-chunks-query.dto.js';
+import type { ListRebuildCandidatesQueryDto } from './dto/list-rebuild-candidates-query.dto.js';
 import type { ProcessingPhase } from './processing-queue.types.js';
 import { CHUNK_OVERLAP, CHUNK_SIZE } from './text-processing.js';
 
@@ -203,6 +204,55 @@ export class ProcessingService {
 
       throw error;
     }
+  }
+
+  async findRebuildCandidates({
+    cursor,
+    limit,
+  }: ListRebuildCandidatesQueryDto) {
+    let target: ReturnType<VectorStoreService['target']>;
+    try {
+      target = this.vectors.target();
+    } catch (error) {
+      if (error instanceof VectorStoreError) {
+        throw new ServiceUnavailableException(
+          'Vector index configuration is unavailable',
+        );
+      }
+      throw error;
+    }
+
+    const rows = await this.prisma.file.findMany({
+      where: {
+        deletedAt: null,
+        storageKey: { not: null },
+        ...(cursor ? { id: { gt: cursor } } : {}),
+        OR: [
+          { indexStatus: { in: [IndexStatus.PENDING, IndexStatus.FAILED] } },
+          {
+            indexStatus: IndexStatus.READY,
+            OR: [
+              { vectorCollection: null },
+              { vectorCollection: { not: target.collection } },
+            ],
+          },
+        ],
+      },
+      orderBy: { id: 'asc' },
+      take: limit + 1,
+      select: {
+        id: true,
+        originalName: true,
+        indexStatus: true,
+        vectorCollection: true,
+      },
+    });
+    const items = rows.slice(0, limit);
+    return {
+      target,
+      items,
+      nextCursor: rows.length > limit ? items[limit - 1].id : null,
+    };
   }
 
   async findChunks(id: string, query: ListChunksQueryDto) {
