@@ -246,7 +246,7 @@ describe('File retrieval pipeline (e2e)', () => {
     expect(result.body).toEqual({ status: 'ok', service: 'filemind-api' });
   });
 
-  it('recovers a queued job from a fresh file read and reports its indexing phase', async () => {
+  it('reports live progress and keeps terminal history after Redis removes the job', async () => {
     const file = await upload(
       await readFile(new URL('./fixtures/two-pages.pdf', import.meta.url)),
       'progress-check.pdf',
@@ -283,6 +283,45 @@ describe('File retrieval pipeline (e2e)', () => {
       state: 'completed',
       phase: 'indexing',
     });
+    await vi.waitFor(
+      async () => {
+        const history = await request(app!.getHttpServer())
+          .get(`/files/${file.id}/processing-jobs`)
+          .query({ limit: 1 })
+          .expect(200);
+        expect(history.body).toMatchObject({
+          items: [
+            {
+              jobId,
+              state: 'completed',
+              phase: 'indexing',
+              finishedAt: expect.any(String),
+            },
+          ],
+          page: 1,
+          limit: 1,
+          hasMore: false,
+        });
+      },
+      { timeout: 5000 },
+    );
+    const redisJob = await queue!.getJob(jobId);
+    expect(redisJob).toBeDefined();
+    await redisJob!.remove();
+
+    const archived = await request(app!.getHttpServer())
+      .get(statusUrl)
+      .expect(200);
+    expect(archived.body).toMatchObject({
+      jobId,
+      state: 'completed',
+      phase: 'indexing',
+      result: { chunkCount: expect.any(Number) },
+    });
+    const detail = await request(app!.getHttpServer())
+      .get(`/files/${file.id}`)
+      .expect(200);
+    expect(detail.body.processingJob).toEqual({ jobId, state: 'completed' });
   }, 30000);
 
   it('finds byte-identical uploads across filenames, paginates and excludes deleted copies', async () => {

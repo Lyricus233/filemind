@@ -13,6 +13,7 @@ implemented features and remaining product capabilities.
 - PDF/DOCX text extraction with PDF page locations and DOCX paragraph ranges in
   chunk listings and retrieval results.
 - Separate BullMQ/Redis processing worker, bounded retries and job status APIs.
+- PostgreSQL history for completed and failed processing jobs.
 - Bulk indexing by file ID with a submission result for each file.
 - Paginated rebuild candidates for the configured vector collection.
 - Literal chunk search with match ranges and pagination.
@@ -28,7 +29,7 @@ implemented features and remaining product capabilities.
 ## Next backend milestones
 
 1. **File/index management:** resumable rebuild runs, orphan cleanup and durable
-   task/progress history.
+   progress for jobs still running.
 2. **More document formats:** PPTX, spreadsheets and HTML as needed. Improve
    reading order, structural chunking and table/section locations.
    Add OCR for scanned documents.

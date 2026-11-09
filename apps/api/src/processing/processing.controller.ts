@@ -13,6 +13,7 @@ import {
 
 import { BatchProcessingDto } from './dto/batch-processing.dto.js';
 import { ListChunksQueryDto } from './dto/list-chunks-query.dto.js';
+import { ListProcessingJobsQueryDto } from './dto/list-processing-jobs-query.dto.js';
 import { ListRebuildCandidatesQueryDto } from './dto/list-rebuild-candidates-query.dto.js';
 import { ProcessingJobsService } from './processing-jobs.service.js';
 import { ProcessingService } from './processing.service.js';
@@ -40,6 +41,15 @@ export class ProcessingController {
   @HttpCode(HttpStatus.ACCEPTED)
   process(@Param('id', ParseUUIDPipe) id: string) {
     return this.processingJobsService.enqueue(id);
+  }
+
+  @Get(':id/processing-jobs')
+  @Header('Cache-Control', 'no-store')
+  listJobs(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListProcessingJobsQueryDto,
+  ) {
+    return this.processingJobsService.list(id, query);
   }
 
   @Get(':id/processing-jobs/:jobId')

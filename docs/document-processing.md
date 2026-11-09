@@ -37,6 +37,27 @@ A `failed` item has `fileId`, `statusCode` and `message`. A missing file or a
 queue error affects that item alone. Resubmitting a file with an active job
 returns that job's ID. An invalid request body returns HTTP 400 before submission.
 
+## Processing history
+
+After applying the processing history migration and restarting the API and worker,
+list completed and failed jobs for a file in descending finish order:
+
+```powershell
+$fileId = 'replace-with-an-uploaded-file-uuid'
+Invoke-RestMethod -NoProxy "http://127.0.0.1:3000/files/$fileId/processing-jobs?page=1&limit=20"
+```
+
+The response contains `items`, `page`, `limit` and `hasMore`. Each item records
+the final state, last known phase, attempt count, queue and finish timestamps,
+and either the result or a failure message. The existing per-job status URL
+can serve archived results after Redis has expired the job. Queued and running
+jobs still report their live state through the status URL.
+
+The worker archives terminal events from the new version onward. Earlier Redis
+jobs follow their original retention policy. If the worker misses the terminal
+event or PostgreSQL cannot save it, the Redis status remains available for its
+usual retention period. Deleting a file also deletes its archived jobs.
+
 ## Try the complete workflow
 
 The repository includes small synthetic documents for testing. From `apps/api`:

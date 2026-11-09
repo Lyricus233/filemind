@@ -19,27 +19,49 @@ enum IndexStatus {
   FAILED
 }
 
+enum ProcessingJobOutcome {
+  completed
+  failed
+}
+
 model File {
-  id               String            @id @default(uuid()) @db.Uuid
+  id               String              @id @default(uuid()) @db.Uuid
   originalName     String
   mimeType         String
   sizeBytes        BigInt
-  storageKey       String?           @unique
-  contentHash      String?           @db.Char(64)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  storageKey       String?             @unique
+  contentHash      String?             @db.Char(64)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
   chunks           FileChunk[]
-  indexStatus      IndexStatus       @default(PENDING)
-  indexJobId       String?           @db.Uuid
+  indexStatus      IndexStatus         @default(PENDING)
+  indexJobId       String?             @db.Uuid
   vectorCollection String?
   indexedAt        DateTime?
   deletedAt        DateTime?
   vectorIndexes    FileVectorIndex[]
+  processingJobs   FileProcessingJob[]
 
   @@index([vectorCollection, indexStatus])
   @@index([deletedAt])
   @@index([contentHash, deletedAt])
   @@map("files")
+}
+
+model FileProcessingJob {
+  jobId        String               @id @db.Uuid
+  fileId       String               @db.Uuid
+  state        ProcessingJobOutcome
+  attemptsMade Int
+  phase        String?
+  result       Json?
+  error        String?
+  queuedAt     DateTime
+  finishedAt   DateTime
+  file         File                 @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId, finishedAt, jobId])
+  @@map("file_processing_jobs")
 }
 
 model FileVectorIndex {

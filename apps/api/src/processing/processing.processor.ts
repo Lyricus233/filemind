@@ -5,6 +5,7 @@ import { type Job, UnrecoverableError } from 'bullmq';
 import { EmbeddingError } from '../embeddings/embedding-error.js';
 import { VectorStoreError } from '../vectors/vector-store-error.js';
 import { extractChunksInWorker } from './document-extraction.worker.js';
+import { ProcessingHistoryService } from './processing-history.service.js';
 import {
   PROCESSING_QUEUE,
   PROCESS_FILE_JOB,
@@ -17,7 +18,10 @@ import { ProcessingService } from './processing.service.js';
 export class ProcessingProcessor extends WorkerHost {
   private readonly logger = new Logger(ProcessingProcessor.name);
 
-  constructor(private readonly processingService: ProcessingService) {
+  constructor(
+    private readonly processingService: ProcessingService,
+    private readonly history: ProcessingHistoryService,
+  ) {
     super();
   }
 
@@ -73,6 +77,13 @@ export class ProcessingProcessor extends WorkerHost {
     this.logger.error('Processing worker connection error', error.stack);
   }
 
+  @OnWorkerEvent('completed')
+  async onCompleted(job: Job<ProcessingJobData>, result: ProcessingJobResult) {
+    if (job.name === PROCESS_FILE_JOB) {
+      await this.history.archive(job, { state: 'completed', result });
+    }
+  }
+
   @OnWorkerEvent('failed')
   async onFailed(job: Job<ProcessingJobData> | undefined, error: Error) {
     this.logger.warn(
@@ -80,12 +91,14 @@ export class ProcessingProcessor extends WorkerHost {
     );
     if (!job?.id || job.name !== PROCESS_FILE_JOB) return;
     try {
-      if ((await job.getState()) === 'failed') {
-        await this.processingService.recordTerminalFailure(
-          job.data.fileId,
-          job.id,
-        );
-      }
+      if (job.finishedOn == null && (await job.getState()) !== 'failed') return;
+      await Promise.all([
+        this.processingService.recordTerminalFailure(job.data.fileId, job.id),
+        this.history.archive(job, {
+          state: 'failed',
+          error: job.failedReason || error.message,
+        }),
+      ]);
     } catch (cause) {
       this.logger.warn(
         `Could not record terminal failure for job ${job.id}`,

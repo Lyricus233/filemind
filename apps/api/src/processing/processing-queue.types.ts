@@ -13,6 +13,17 @@ export const PROCESSING_PHASES = [
 ] as const;
 export type ProcessingPhase = (typeof PROCESSING_PHASES)[number];
 
+export function processingPhase(progress: unknown): ProcessingPhase | null {
+  if (
+    typeof progress !== 'object' ||
+    progress === null ||
+    !('phase' in progress)
+  ) {
+    return null;
+  }
+  return PROCESSING_PHASES.find((phase) => phase === progress.phase) ?? null;
+}
+
 export interface ProcessingJobData {
   fileId: string;
 }

@@ -13,11 +13,13 @@ import {
 
 import { IndexStatus } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { ListProcessingJobsQueryDto } from './dto/list-processing-jobs-query.dto.js';
+import { ProcessingHistoryService } from './processing-history.service.js';
 import {
-  PROCESSING_PHASES,
   PROCESSING_QUEUE,
   PROCESS_FILE_JOB,
   type ProcessingQueue,
+  processingPhase,
 } from './processing-queue.types.js';
 
 type ProcessingSubmission = {
@@ -41,6 +43,7 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
     @InjectQueue(PROCESSING_QUEUE)
     private readonly queue: ProcessingQueue,
     private readonly prisma: PrismaService,
+    private readonly history: ProcessingHistoryService,
   ) {}
 
   onModuleInit() {
@@ -147,9 +150,9 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
   async attachStatus<T extends { id: string; indexJobId: string | null }>(
     file: T,
   ) {
+    let jobId = file.indexJobId;
     try {
-      const activeId = await this.queue.getDeduplicationJobId(file.id);
-      const jobId = activeId ?? file.indexJobId;
+      jobId = (await this.queue.getDeduplicationJobId(file.id)) ?? jobId;
       const job = jobId ? await this.queue.getJob(jobId) : undefined;
       if (job?.id && job.data.fileId === file.id) {
         const state = await job.getState();
@@ -159,7 +162,13 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
     } catch {
       // The file library remains available when Redis cannot be reached.
     }
-    return { ...file, processingJob: null };
+    const archived = jobId ? await this.history.findOne(file.id, jobId) : null;
+    return {
+      ...file,
+      processingJob: archived
+        ? { jobId: archived.jobId, state: archived.state }
+        : null,
+    };
   }
 
   async releaseAbandoned(file: {
@@ -194,12 +203,11 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async findOne(fileId: string, jobId: string) {
-    const file = await this.prisma.file.findUnique({
-      where: { id: fileId },
-      select: { id: true, deletedAt: true },
-    });
-    if (!file || file.deletedAt) throw new NotFoundException('File not found');
-    fileId = file.id;
+    fileId = await this.findVisibleFileId(fileId);
+    jobId = jobId.toLowerCase();
+    const archived = await this.history.findOne(fileId, jobId);
+    if (archived) return archived;
+
     const initialJob = await this.withQueue(() => this.queue.getJob(jobId));
 
     if (initialJob === undefined || initialJob.data.fileId !== fileId) {
@@ -224,22 +232,28 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
       job = refreshedJob;
     }
 
-    const progress = job.progress;
-    const phase =
-      typeof progress === 'object' && progress !== null && 'phase' in progress
-        ? (PROCESSING_PHASES.find(
-            (candidate) => candidate === progress.phase,
-          ) ?? null)
-        : null;
     return {
       fileId,
       jobId,
       state,
       attemptsMade: job.attemptsMade,
-      phase,
+      phase: processingPhase(job.progress),
       result: state === 'completed' ? job.returnvalue : null,
       error: state === 'failed' ? job.failedReason : null,
     };
+  }
+
+  async list(fileId: string, query: ListProcessingJobsQueryDto) {
+    return this.history.list(await this.findVisibleFileId(fileId), query);
+  }
+
+  private async findVisibleFileId(fileId: string) {
+    const file = await this.prisma.file.findUnique({
+      where: { id: fileId },
+      select: { id: true, deletedAt: true },
+    });
+    if (!file || file.deletedAt) throw new NotFoundException('File not found');
+    return file.id;
   }
 
   private async withQueue<T>(operation: () => Promise<T>): Promise<T> {

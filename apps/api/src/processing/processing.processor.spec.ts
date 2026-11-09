@@ -9,6 +9,7 @@ import { type Job, UnrecoverableError } from 'bullmq';
 
 import { EmbeddingError } from '../embeddings/embedding-error.js';
 import { VectorStoreError } from '../vectors/vector-store-error.js';
+import { ProcessingHistoryService } from './processing-history.service.js';
 import {
   PROCESS_FILE_JOB,
   type ProcessingJobData,
@@ -19,19 +20,23 @@ import { ProcessingService } from './processing.service.js';
 
 describe('ProcessingProcessor', () => {
   const fileId = 'e71d88f0-9b85-48bc-8cac-c9b28ac19a2f';
-  const processing = { process: vi.fn() };
+  const processing = { process: vi.fn(), recordTerminalFailure: vi.fn() };
+  const history = { archive: vi.fn() };
   let processor: ProcessingProcessor;
-  const job = {
+  const jobFixture = {
     id: '2bd23a57-6d56-4cbb-8986-9c24acdc1d89',
     name: PROCESS_FILE_JOB,
     data: { fileId },
-  } as Job<ProcessingJobData, ProcessingJobResult, string>;
+  };
+  const job = jobFixture as Job<ProcessingJobData, ProcessingJobResult, string>;
 
   beforeEach(() => {
     vi.resetAllMocks();
     vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     processor = new ProcessingProcessor(
       processing as unknown as ProcessingService,
+      history as unknown as ProcessingHistoryService,
     );
   });
 
@@ -102,5 +107,48 @@ describe('ProcessingProcessor', () => {
       UnrecoverableError,
     );
     expect(processing.process).not.toHaveBeenCalled();
+  });
+
+  it('archives the completed job after BullMQ acknowledges the result', async () => {
+    const result = {
+      fileId,
+      chunkCount: 3,
+      chunkSize: 500,
+      overlap: 100,
+      indexed: true as const,
+      model: 'test-model',
+      dimensions: 3,
+    };
+    await processor.onCompleted(job, result);
+    expect(history.archive).toHaveBeenCalledWith(job, {
+      state: 'completed',
+      result,
+    });
+  });
+
+  it('archives only terminal failures and releases the file status', async () => {
+    const error = new Error('File processing failed; see worker logs');
+    const retrying = {
+      ...jobFixture,
+      getState: vi.fn().mockResolvedValue('delayed'),
+    };
+    await processor.onFailed(retrying as unknown as typeof job, error);
+    expect(history.archive).not.toHaveBeenCalled();
+    expect(processing.recordTerminalFailure).not.toHaveBeenCalled();
+
+    const terminal = {
+      ...retrying,
+      finishedOn: Date.now(),
+      failedReason: error.message,
+    } as unknown as typeof job;
+    await processor.onFailed(terminal, error);
+    expect(history.archive).toHaveBeenCalledWith(terminal, {
+      state: 'failed',
+      error: error.message,
+    });
+    expect(processing.recordTerminalFailure).toHaveBeenCalledWith(
+      fileId,
+      job.id,
+    );
   });
 });

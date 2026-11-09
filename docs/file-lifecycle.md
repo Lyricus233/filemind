@@ -75,7 +75,8 @@ Deletion does not forcibly terminate running jobs.
 
 BullMQ's completed and failed job records keep their existing retention policy.
 They are not synchronously removed by file deletion, and the public status endpoint
-returns 404 once the file is hidden or gone.
+returns 404 once the file is hidden or gone. PostgreSQL processing history is
+hidden with the file and removed when the file row is deleted.
 
 ## Collection history
 

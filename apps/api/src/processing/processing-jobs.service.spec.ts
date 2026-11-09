@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service.js';
+import { ProcessingHistoryService } from './processing-history.service.js';
 import { ProcessingJobsService } from './processing-jobs.service.js';
 import {
   PROCESS_FILE_JOB,
@@ -22,6 +23,7 @@ describe('ProcessingJobsService', () => {
     off: vi.fn(),
   };
   const prisma = { file: { findUnique: vi.fn(), updateMany: vi.fn() } };
+  const history = { findOne: vi.fn(), list: vi.fn() };
   let service: ProcessingJobsService;
 
   beforeEach(() => {
@@ -35,6 +37,7 @@ describe('ProcessingJobsService', () => {
     service = new ProcessingJobsService(
       queue as unknown as ProcessingQueue,
       prisma as unknown as PrismaService,
+      history as unknown as ProcessingHistoryService,
     );
   });
 
@@ -249,6 +252,40 @@ describe('ProcessingJobsService', () => {
     await expect(service.findOne(fileId, jobId)).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('serves archived jobs without accessing Redis and restores the file job summary', async () => {
+    const archived = { fileId, jobId, state: 'completed', phase: 'indexing' };
+    history.findOne.mockResolvedValue(archived);
+    await expect(service.findOne(fileId, jobId.toUpperCase())).resolves.toEqual(
+      archived,
+    );
+    expect(history.findOne).toHaveBeenCalledWith(fileId, jobId);
+    expect(queue.getJob).not.toHaveBeenCalled();
+
+    queue.getDeduplicationJobId.mockRejectedValue(
+      new Error('Redis unavailable'),
+    );
+    await expect(
+      service.attachStatus({ id: fileId, indexJobId: jobId }),
+    ).resolves.toMatchObject({
+      processingJob: { jobId, state: 'completed' },
+    });
+  });
+
+  it('hides processing history as soon as a file is marked deleted', async () => {
+    prisma.file.findUnique.mockResolvedValue({
+      id: fileId,
+      deletedAt: new Date(),
+    });
+    await expect(
+      service.list(fileId, { page: 1, limit: 20 }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.findOne(fileId, jobId)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(history.list).not.toHaveBeenCalled();
+    expect(history.findOne).not.toHaveBeenCalled();
   });
 
   it('rejects a job belonging to another file', async () => {
