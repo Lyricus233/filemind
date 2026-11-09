@@ -1,13 +1,9 @@
 import { useState } from 'react';
 
-import { filePath } from './api';
+import { chunkVectorPath } from './api';
+import type { ChunkVector } from './api';
 import { Loading, Notice } from './ui';
 import { useResource } from './use-resource';
-
-type ChunkVector = {
-  dimensions: number;
-  vector: number[];
-} & ({ example: true } | { collection: string; model: string });
 
 const PREVIEW_DIMENSIONS = 32;
 
@@ -21,9 +17,8 @@ export function ChunkVectorInspection({
   const [open, setOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [copyStatus, setCopyStatus] = useState('');
-  const path = `${filePath(fileId)}/chunks/${encodeURIComponent(chunkId)}/vector`;
   const { data, loading, error } = useResource<ChunkVector>(
-    open ? path : null,
+    open ? chunkVectorPath(fileId, chunkId) : null,
     refresh,
   );
   const preview = data?.vector.slice(0, PREVIEW_DIMENSIONS) ?? [];

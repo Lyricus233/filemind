@@ -37,6 +37,11 @@ export interface Chunk extends Passage {
   id: string;
 }
 
+export type ChunkVector = {
+  dimensions: number;
+  vector: number[];
+} & ({ example: true } | { collection: string; model: string });
+
 export interface MatchRange {
   start: number;
   end: number;
@@ -79,6 +84,10 @@ export const PAGE_SIZE = 20;
 
 export function filePath(id: string) {
   return `/files/${encodeURIComponent(id)}`;
+}
+
+export function chunkVectorPath(fileId: string, chunkId: string) {
+  return `${filePath(fileId)}/chunks/${encodeURIComponent(chunkId)}/vector`;
 }
 
 export function pageNumber(raw: string | null) {

@@ -18,6 +18,7 @@ implemented features and remaining product capabilities.
 - Milvus vector storage, cosine search, model/dimension checks and file filters.
 - Text indexing lifecycle and semantic search returning original source passages.
 - On-demand inspection of stored chunk vectors in the web workbench.
+- Pairwise cosine comparison of selected search results in the workbench and static demo.
 - Retryable file deletion across local storage, PostgreSQL and tracked Milvus
   collections, with processing/deletion coordination.
 - Unit, API, real Milvus and complete retrieval integration tests.

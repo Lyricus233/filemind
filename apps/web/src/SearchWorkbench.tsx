@@ -9,6 +9,7 @@ import {
   CornerDownLeft,
   Eye,
   Files,
+  Grid2X2,
   Info,
   MapPin,
   Search,
@@ -24,6 +25,8 @@ import { ChunkVectorInspection } from './ChunkVectorInspection';
 import { DEMO_KEYWORD, DEMO_MODE, DEMO_QUESTION } from './demo';
 import { DocumentIcon, PassageText, fileType, jumpToPageAnchor } from './ui';
 import { useResource } from './use-resource';
+import { MAX_VECTOR_COMPARISON, VectorComparison } from './VectorComparison';
+import type { ComparedChunk } from './VectorComparison';
 
 type Mode = SearchResponse['mode'];
 type Hit = SearchResponse['items'][number];
@@ -252,7 +255,7 @@ function WorkbenchSearch({
   );
 }
 
-function Inspector({ hit }: { hit?: Hit }) {
+function Inspector({ hit, hidden }: { hit?: Hit; hidden: boolean }) {
   const [copyState, setCopyState] = useState('');
   const source = hit ? sourceLabel(hit.source) : null;
 
@@ -285,6 +288,7 @@ function Inspector({ hit }: { hit?: Hit }) {
       className="wp-panel wp-inspector"
       aria-labelledby="wp-inspector-title"
       id="wp-inspector"
+      hidden={hidden}
       tabIndex={0}
     >
       <div className="wp-panel-head">
@@ -374,7 +378,10 @@ export function SearchWorkbench() {
   const [params, setParams] = useSearchParams();
   const [refresh, setRefresh] = useState(0);
   const [selection, setSelection] = useState<{ key: string; id: string }>();
+  const [compared, setCompared] = useState<ComparedChunk[]>([]);
+  const [showComparison, setShowComparison] = useState(false);
   const resultsColumn = useRef<HTMLElement>(null);
+  const comparisonButton = useRef<HTMLButtonElement>(null);
   const query = params.get('q')?.trim() ?? '';
   const mode: Mode = params.get('mode') === 'semantic' ? 'semantic' : 'literal';
   const fileId = params.get('file') ?? '';
@@ -412,6 +419,30 @@ export function SearchWorkbench() {
     resultsColumn.current?.focus({ preventScroll: true });
     resultsColumn.current?.scrollIntoView({ block: 'start' });
     search(query, mode, nextPage);
+  }
+
+  function toggleComparison({ chunkId, file, index }: Hit) {
+    setCompared((items) => {
+      if (items.some((item) => item.chunkId === chunkId))
+        return items.filter((item) => item.chunkId !== chunkId);
+      return items.length < MAX_VECTOR_COMPARISON
+        ? [...items, { chunkId, file, index }]
+        : items;
+    });
+  }
+
+  function selectHit(hit: Hit) {
+    setSelection({ key, id: hit.chunkId });
+    setShowComparison(false);
+  }
+
+  function closeComparison() {
+    setShowComparison(false);
+    requestAnimationFrame(() => {
+      (comparisonButton.current ?? resultsColumn.current)?.focus({
+        preventScroll: true,
+      });
+    });
   }
 
   return (
@@ -478,13 +509,34 @@ export function SearchWorkbench() {
                   ''
                 )}
               </span>
-              <span className="wp-result-mode">
-                {mode === 'literal'
-                  ? '关键词模式'
-                  : DEMO_MODE
-                    ? '语义示例'
-                    : '语义模式'}
-              </span>
+              {compared.length > 0 || showComparison ? (
+                <button
+                  ref={comparisonButton}
+                  className="wp-compare-trigger"
+                  type="button"
+                  aria-expanded={showComparison}
+                  aria-controls={
+                    showComparison ? 'wp-comparison-panel' : undefined
+                  }
+                  onClick={() =>
+                    showComparison ? closeComparison() : setShowComparison(true)
+                  }
+                >
+                  <Grid2X2 aria-hidden="true" />
+                  对比
+                  <span className="wp-number">
+                    {compared.length}/{MAX_VECTOR_COMPARISON}
+                  </span>
+                </button>
+              ) : (
+                <span className="wp-result-mode">
+                  {mode === 'literal'
+                    ? '关键词模式'
+                    : DEMO_MODE
+                      ? '语义示例'
+                      : '语义模式'}
+                </span>
+              )}
             </div>
             {!query && (
               <div className="wp-empty">
@@ -535,6 +587,9 @@ export function SearchWorkbench() {
               <ol className="wp-results-list">
                 {data.items.map((hit, index) => {
                   const selected = hit.chunkId === active?.chunkId;
+                  const inComparison = compared.some(
+                    (item) => item.chunkId === hit.chunkId,
+                  );
                   return (
                     <li
                       key={hit.chunkId}
@@ -551,7 +606,7 @@ export function SearchWorkbench() {
                         ]
                           .filter(Boolean)
                           .join('，')}
-                        onClick={() => setSelection({ key, id: hit.chunkId })}
+                        onClick={() => selectHit(hit)}
                       >
                         <span className="wp-rank">
                           {(data.mode === 'literal'
@@ -596,7 +651,7 @@ export function SearchWorkbench() {
                           matches={'matches' in hit ? hit.matches : undefined}
                         />
                         <div className="wp-result-bottom">
-                          {selected ? (
+                          {selected && !showComparison ? (
                             <a
                               href="#wp-inspector"
                               className="wp-selected-note"
@@ -606,14 +661,21 @@ export function SearchWorkbench() {
                               核对选中原文
                             </a>
                           ) : (
-                            <button
-                              onClick={() =>
-                                setSelection({ key, id: hit.chunkId })
-                              }
-                            >
+                            <button onClick={() => selectHit(hit)}>
                               查看切片
                             </button>
                           )}
+                          <button
+                            type="button"
+                            aria-pressed={inComparison}
+                            disabled={
+                              !inComparison &&
+                              compared.length >= MAX_VECTOR_COMPARISON
+                            }
+                            onClick={() => toggleComparison(hit)}
+                          >
+                            {inComparison ? '移除对比' : '加入对比'}
+                          </button>
                           {'score' in hit && (
                             <span className="wp-score" title="余弦相似度">
                               相似度{' '}
@@ -676,7 +738,23 @@ export function SearchWorkbench() {
             </p>
           )}
         </section>
-        <Inspector hit={active} key={`${key}:${active?.chunkId ?? ''}`} />
+        <Inspector
+          hit={active}
+          hidden={showComparison}
+          key={`${key}:${active?.chunkId ?? ''}`}
+        />
+        {showComparison && (
+          <VectorComparison
+            items={compared}
+            onDismiss={closeComparison}
+            onRemove={(chunkId) =>
+              setCompared((items) =>
+                items.filter((item) => item.chunkId !== chunkId),
+              )
+            }
+            onClear={() => setCompared([])}
+          />
+        )}
       </div>
     </>
   );

@@ -24,6 +24,10 @@ highlighted and the result points to page 2. Select a result to inspect its sour
 chunk, or use `打开文件详情` to open it in the file detail page. Semantic mode
 displays the returned cosine scores, model, and vector dimensions.
 
+Add two to four results to **向量对比** to see their pairwise cosine similarity
+using the full chunk vectors. Results from different vector spaces have an
+empty score. The static demo offers the same comparison with its sample vectors.
+
 `pnpm build` typechecks the app and produces `dist`. When serving that output,
 configure the host to serve `index.html` for client routes and forward `/api` to
 the API with the prefix removed.
