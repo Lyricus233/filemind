@@ -106,6 +106,74 @@ describe('ProcessingJobsService', () => {
     );
   });
 
+  it('submits distinct batch IDs in order and continues after per-file failures', async () => {
+    const missing = 'b0d3bade-695a-4ee7-9247-8c8b2c2d47e3';
+    const unavailable = 'c52d33d0-7dc0-4910-b5f7-e9aa90da4c22';
+    const unexpected = 'dd41f602-73e5-49e0-8a7d-a2d65ec478d0';
+    const last = 'f7da9216-e16f-4406-8bf4-943bf0a0c85d';
+    const existingJobId = '85595c9d-2b47-4d7f-9309-bb93a6a3f894';
+    prisma.file.findUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) => {
+        if (where.id === missing) return null;
+        if (where.id === unexpected) throw new Error('Database error details');
+        return { id: where.id, storageKey: 'blob-key' };
+      },
+    );
+    queue.add
+      .mockResolvedValueOnce({ id: jobId })
+      .mockRejectedValueOnce(new Error('Redis unavailable'))
+      .mockResolvedValueOnce({ id: existingJobId });
+
+    await expect(
+      service.enqueueMany([
+        fileId.toUpperCase(),
+        missing,
+        unavailable,
+        fileId,
+        unexpected,
+        last,
+      ]),
+    ).resolves.toEqual({
+      items: [
+        {
+          status: 'accepted',
+          fileId,
+          jobId,
+          statusUrl: `/files/${fileId}/processing-jobs/${jobId}`,
+        },
+        {
+          status: 'failed',
+          fileId: missing,
+          statusCode: 404,
+          message: 'File not found',
+        },
+        {
+          status: 'failed',
+          fileId: unavailable,
+          statusCode: 503,
+          message: 'Processing queue is unavailable',
+        },
+        {
+          status: 'failed',
+          fileId: unexpected,
+          statusCode: 500,
+          message: 'Unable to submit file for processing',
+        },
+        {
+          status: 'accepted',
+          fileId: last,
+          jobId: existingJobId,
+          statusUrl: `/files/${last}/processing-jobs/${existingJobId}`,
+        },
+      ],
+    });
+    expect(queue.add.mock.calls.map(([, data]) => data)).toEqual([
+      { fileId },
+      { fileId: unavailable },
+      { fileId: last },
+    ]);
+  });
+
   it.each(['failed', 'completed', undefined])(
     'allows reprocessing after an abandoned job is %s',
     async (state) => {

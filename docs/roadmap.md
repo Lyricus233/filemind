@@ -13,6 +13,7 @@ implemented features and remaining product capabilities.
 - PDF/DOCX text extraction with PDF page locations and DOCX paragraph ranges in
   chunk listings and retrieval results.
 - Separate BullMQ/Redis processing worker, bounded retries and job status APIs.
+- Bulk indexing by file ID with a submission result for each file.
 - Literal chunk search with match ranges and pagination.
 - Configurable remote embeddings through the OpenAI SDK; Qwen is the current model.
 - Milvus vector storage, cosine search, model/dimension checks and file filters.
@@ -25,7 +26,7 @@ implemented features and remaining product capabilities.
 
 ## Next backend milestones
 
-1. **File/index management:** bulk indexing, index rebuilding,
+1. **File/index management:** index rebuilding,
    orphan cleanup and durable task/progress history.
 2. **More document formats:** PPTX, spreadsheets and HTML as needed. Improve
    reading order, structural chunking and table/section locations.

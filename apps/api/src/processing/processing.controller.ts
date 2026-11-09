@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Header,
@@ -10,6 +11,7 @@ import {
   Query,
 } from '@nestjs/common';
 
+import { BatchProcessingDto } from './dto/batch-processing.dto.js';
 import { ListChunksQueryDto } from './dto/list-chunks-query.dto.js';
 import { ProcessingJobsService } from './processing-jobs.service.js';
 import { ProcessingService } from './processing.service.js';
@@ -20,6 +22,12 @@ export class ProcessingController {
     private readonly processingService: ProcessingService,
     private readonly processingJobsService: ProcessingJobsService,
   ) {}
+
+  @Post('process')
+  @HttpCode(HttpStatus.OK)
+  processBatch(@Body() body: BatchProcessingDto) {
+    return this.processingJobsService.enqueueMany(body.fileIds);
+  }
 
   @Post(':id/process')
   @HttpCode(HttpStatus.ACCEPTED)

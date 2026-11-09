@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { InjectQueue } from '@nestjs/bullmq';
 import {
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
@@ -18,6 +19,16 @@ import {
   PROCESS_FILE_JOB,
   type ProcessingQueue,
 } from './processing-queue.types.js';
+
+type ProcessingSubmission = {
+  fileId: string;
+  jobId: string;
+  statusUrl: string;
+};
+
+type BatchProcessingItem =
+  | (ProcessingSubmission & { status: 'accepted' })
+  | { status: 'failed'; fileId: string; statusCode: number; message: string };
 
 @Injectable()
 export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
@@ -40,7 +51,40 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
     this.queue.off('error', this.onQueueError);
   }
 
-  async enqueue(fileId: string) {
+  async enqueueMany(fileIds: string[]) {
+    const items: BatchProcessingItem[] = [];
+    for (const fileId of new Set(fileIds.map((id) => id.toLowerCase()))) {
+      try {
+        items.push({ status: 'accepted', ...(await this.enqueue(fileId)) });
+      } catch (error) {
+        if (
+          error instanceof NotFoundException ||
+          error instanceof ServiceUnavailableException
+        ) {
+          items.push({
+            status: 'failed',
+            fileId,
+            statusCode: error.getStatus(),
+            message: error.message,
+          });
+        } else {
+          this.logger.error(
+            `Processing submission failed for ${fileId}`,
+            error instanceof Error ? error.stack : String(error),
+          );
+          items.push({
+            status: 'failed',
+            fileId,
+            statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+            message: 'Unable to submit file for processing',
+          });
+        }
+      }
+    }
+    return { items };
+  }
+
+  async enqueue(fileId: string): Promise<ProcessingSubmission> {
     const file = await this.prisma.file.findUnique({
       where: { id: fileId },
       select: {

@@ -20,6 +20,23 @@ Restart the API and worker. The new migration adds a nullable JSON `source` colu
 to `file_chunks`. Existing text chunks keep `source: null`. Existing files can be
 processed again through `POST /files/:id/process`.
 
+## Submit a batch
+
+Send `POST /files/process` with a JSON body containing 1–20 file UUIDs. The
+response has one item per distinct UUID in first-seen order. Uppercase and
+lowercase spellings of the same UUID count as one file.
+
+```powershell
+$body = @{ fileIds = @($first.id, $second.id) } | ConvertTo-Json -Compress
+Invoke-RestMethod -NoProxy -Method Post -Uri 'http://127.0.0.1:3000/files/process' -ContentType 'application/json' -Body $body
+```
+
+A valid batch returns HTTP 200 with an `items` array. An `accepted` item has
+`fileId`, `jobId` and `statusUrl`. Poll `statusUrl` to check indexing progress.
+A `failed` item has `fileId`, `statusCode` and `message`. A missing file or a
+queue error affects that item alone. Resubmitting a file with an active job
+returns that job's ID. An invalid request body returns HTTP 400 before submission.
+
 ## Try the complete workflow
 
 The repository includes small synthetic documents for testing. From `apps/api`:
