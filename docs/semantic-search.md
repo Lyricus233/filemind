@@ -168,9 +168,21 @@ Use `--api <url>` for another API base URL or `--max-batches <n>` to change the
 number of pages per invocation. The checkpoint's API, collection, model and
 dimensions must match when resuming. Use a fresh checkpoint for a new pass.
 
-Each batch prints its job IDs and status URLs. `done: true` means submission
-has finished. Use the status URLs to track indexing itself. A missing file is
-counted as skipped. When the API reports a submission error or the response
+Each batch prints and saves its job IDs. `done: true` means submission
+has finished. Run the status command with the same checkpoint for a snapshot
+of the recorded jobs:
+
+```powershell
+pnpm run files:rebuild-index --status --checkpoint ./rebuild-checkpoint.json
+```
+
+The report queries the API saved in the checkpoint. It shows each job's current
+or archived state and totals for completed, failed, pending and unavailable
+jobs. Older checkpoints without job IDs show those submissions as `untracked`.
+The status command exits with code 1 if any job failed, could not be checked,
+or could not be matched to a saved ID, or if submissions are unconfirmed.
+
+A missing file is counted as skipped. When the API reports a submission error or the response
 is lost, the remaining file IDs stay in the checkpoint's `pending` entry.
 Review those IDs and the jobs already created before adding `--retry-uncertain`.
 The queue deduplicates active jobs. Resubmitting a job that already finished can

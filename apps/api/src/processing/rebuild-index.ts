@@ -16,17 +16,30 @@ type Checkpoint = {
   cursor: string | null;
   pending: Pending | null;
   accepted: number;
+  jobs?: SubmittedJob[];
   skipped: number;
   done: boolean;
 };
+type SubmittedJob = { fileId: string; jobId: string };
 type Submission =
-  | { fileId: string; status: 'accepted'; jobId: string; statusUrl: string }
+  | (SubmittedJob & { status: 'accepted'; statusUrl: string })
   | { fileId: string; status: 'failed'; statusCode: number; message: string };
 
 const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/u;
 
 function isUuid(value: unknown): value is string {
   return typeof value === 'string' && uuid.test(value);
+}
+
+function isSubmittedJob(value: unknown): value is SubmittedJob {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'fileId' in value &&
+    'jobId' in value &&
+    isUuid(value.fileId) &&
+    isUuid(value.jobId)
+  );
 }
 
 function validTarget(target: Target | undefined): target is Target {
@@ -48,6 +61,22 @@ function sameTarget(left: Target, right: Target) {
   );
 }
 
+function parseApiBase(value: string) {
+  const url = new URL(value);
+  if (
+    !['http:', 'https:'].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(
+      'API must be an HTTP(S) base URL without credentials, query or fragment',
+    );
+  }
+  return url.href.replace(/\/+$/u, '');
+}
+
 async function readCheckpoint(path: string): Promise<Checkpoint | undefined> {
   let contents: string;
   try {
@@ -64,6 +93,10 @@ async function readCheckpoint(path: string): Promise<Checkpoint | undefined> {
     !(state.cursor === null || isUuid(state.cursor)) ||
     !Number.isSafeInteger(state.accepted) ||
     state.accepted < 0 ||
+    (state.jobs !== undefined &&
+      (!Array.isArray(state.jobs) ||
+        state.jobs.length > state.accepted ||
+        !state.jobs.every(isSubmittedJob))) ||
     !Number.isSafeInteger(state.skipped) ||
     state.skipped < 0 ||
     typeof state.done !== 'boolean' ||
@@ -99,28 +132,22 @@ export function rebuildOptions(args: string[]) {
   const { values } = parseArgs({
     args,
     options: {
-      api: { type: 'string', default: 'http://127.0.0.1:3000' },
+      api: { type: 'string' },
       apply: { type: 'boolean' },
       checkpoint: { type: 'string' },
       'max-batches': { type: 'string', default: '5' },
       'retry-uncertain': { type: 'boolean' },
+      status: { type: 'boolean' },
       help: { type: 'boolean' },
     },
   });
-  const url = new URL(values.api);
-  if (
-    !['http:', 'https:'].includes(url.protocol) ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash
-  ) {
-    throw new Error(
-      '--api must be an HTTP(S) base URL without credentials, query or fragment',
-    );
-  }
   if (values.apply && !values.checkpoint) {
     throw new Error('--apply requires --checkpoint <path>');
+  }
+  if (values.status && (values.apply || !values.checkpoint)) {
+    throw new Error(
+      '--status requires --checkpoint <path> and cannot be combined with --apply',
+    );
   }
   if (values['retry-uncertain'] && !values.apply) {
     throw new Error('--retry-uncertain requires --apply');
@@ -130,13 +157,84 @@ export function rebuildOptions(args: string[]) {
     throw new Error('--max-batches must be a positive integer');
   }
   return {
-    api: url.href.replace(/\/+$/u, ''),
+    api: parseApiBase(values.api ?? 'http://127.0.0.1:3000'),
+    explicitApi: values.api !== undefined,
     checkpoint: values.checkpoint ? resolve(values.checkpoint) : undefined,
     apply: values.apply,
     maxBatches,
     retryUncertain: values['retry-uncertain'],
+    status: values.status,
     help: values.help,
   };
+}
+
+async function reportStatus(
+  checkpoint: Checkpoint,
+  request: <T>(path: string) => Promise<T>,
+  emit: (data: unknown) => void,
+) {
+  const jobs = checkpoint.jobs ?? [];
+  const counts = { completed: 0, failed: 0, pending: 0, unavailable: 0 };
+  const untracked = checkpoint.accepted - jobs.length;
+  const unconfirmedSubmissions = checkpoint.pending?.fileIds.length ?? 0;
+  for (const { fileId, jobId } of jobs) {
+    const path = `/files/${fileId}/processing-jobs/${jobId}`;
+    let item: Awaited<ReturnType<typeof readStatus>>;
+    try {
+      item = await readStatus(path);
+    } catch (error) {
+      counts.unavailable += 1;
+      emit({
+        fileId,
+        jobId,
+        state: 'unavailable',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+    if (item.state === 'completed') counts.completed += 1;
+    else if (item.state === 'failed') counts.failed += 1;
+    else counts.pending += 1;
+    emit({ fileId, jobId, ...item });
+  }
+  emit({
+    target: checkpoint.target,
+    submissionDone: checkpoint.done,
+    accepted: checkpoint.accepted,
+    skipped: checkpoint.skipped,
+    unconfirmedSubmissions,
+    untracked,
+    ...counts,
+  });
+  return counts.failed ||
+    counts.unavailable ||
+    untracked ||
+    unconfirmedSubmissions
+    ? 1
+    : 0;
+
+  async function readStatus(path: string) {
+    const item = await request<{
+      state?: unknown;
+      phase?: unknown;
+      stale?: unknown;
+      progressUpdatedAt?: unknown;
+      error?: unknown;
+    }>(path);
+    if (typeof item?.state !== 'string' || !item.state) {
+      throw new Error('API returned an invalid job status');
+    }
+    return {
+      state: item.state,
+      phase: typeof item.phase === 'string' ? item.phase : null,
+      stale: item.stale === true,
+      progressUpdatedAt:
+        typeof item.progressUpdatedAt === 'string'
+          ? item.progressUpdatedAt
+          : null,
+      error: typeof item.error === 'string' ? item.error : null,
+    };
+  }
 }
 
 export async function runRebuild(
@@ -149,7 +247,8 @@ export async function runRebuild(
     report?: (value: string) => void;
   } = {},
 ) {
-  const { api, checkpoint } = options;
+  let { api } = options;
+  const { checkpoint } = options;
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetcher(api + path, {
       ...init,
@@ -181,6 +280,16 @@ export async function runRebuild(
 
   function emit(data: unknown) {
     report(JSON.stringify(data));
+  }
+
+  if (options.status && checkpoint) {
+    const saved = await readCheckpoint(checkpoint);
+    if (!saved) throw new Error('Rebuild checkpoint was not found');
+    if (options.explicitApi && saved.api !== api) {
+      throw new Error('Checkpoint belongs to a different API');
+    }
+    api = parseApiBase(saved.api);
+    return reportStatus(saved, request, emit);
   }
 
   if (!options.apply || !checkpoint) {
@@ -250,7 +359,7 @@ export async function runRebuild(
         !pending.fileIds.every((id) => returned.has(id)) ||
         items.some((item) =>
           item.status === 'accepted'
-            ? !isUuid(item.jobId) || !item.statusUrl
+            ? !isSubmittedJob(item) || !item.statusUrl
             : item.status !== 'failed' || !Number.isInteger(item.statusCode),
         )
       ) {
@@ -258,8 +367,10 @@ export async function runRebuild(
       }
       const retry: string[] = [];
       for (const item of items) {
-        if (item.status === 'accepted') state.accepted += 1;
-        else if (item.statusCode === 404) state.skipped += 1;
+        if (item.status === 'accepted') {
+          state.accepted += 1;
+          (state.jobs ??= []).push({ fileId: item.fileId, jobId: item.jobId });
+        } else if (item.statusCode === 404) state.skipped += 1;
         else retry.push(item.fileId);
       }
       if (retry.length > 0) {
@@ -298,7 +409,7 @@ if (
     const options = rebuildOptions(process.argv.slice(2));
     if (options.help) {
       console.log(
-        'files:rebuild-index [--api <url>] [--apply --checkpoint <path>] [--max-batches <n>] [--retry-uncertain]',
+        'files:rebuild-index [--api <url>] [--apply --checkpoint <path>] [--max-batches <n>] [--retry-uncertain]\nfiles:rebuild-index --status --checkpoint <path>',
       );
     } else {
       process.exitCode = await runRebuild(options);

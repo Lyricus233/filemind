@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, rmdir } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, rmdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -143,6 +143,104 @@ describe('file index rebuild CLI', () => {
       cursor: null,
       pending: { fileIds: [first], nextCursor: null },
       done: false,
+    });
+  });
+
+  it('reads saved job status from the original API without changing the checkpoint', async () => {
+    const api = 'http://localhost:3100/api';
+    fetcher
+      .mockResolvedValueOnce(page([first, second, third]))
+      .mockResolvedValueOnce(
+        Response.json({
+          items: [accepted(first), accepted(second), accepted(third)],
+        }),
+      );
+    await expect(
+      runRebuild(options('--api', api), { fetcher, report }),
+    ).resolves.toBe(0);
+    const saved = await readFile(checkpoint, 'utf8');
+    expect(JSON.parse(saved)).toMatchObject({
+      jobs: [
+        { fileId: first, jobId },
+        { fileId: second, jobId },
+        { fileId: third, jobId },
+      ],
+    });
+    fetcher.mockReset();
+    report.mockClear();
+    fetcher
+      .mockResolvedValueOnce(Response.json({ state: 'completed' }))
+      .mockResolvedValueOnce(
+        Response.json({
+          state: 'active',
+          phase: 'embedding',
+          stale: true,
+          progressUpdatedAt: '2026-11-01T08:00:00Z',
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+    await expect(
+      runRebuild(rebuildOptions(['--status', '--checkpoint', checkpoint]), {
+        fetcher,
+        report,
+      }),
+    ).resolves.toBe(1);
+    expect(
+      fetcher.mock.calls.map(([url, init]) => [url, init?.method]),
+    ).toEqual(
+      [first, second, third].map((fileId) => [
+        `${api}${accepted(fileId).statusUrl}`,
+        undefined,
+      ]),
+    );
+    expect(report.mock.calls.map(([line]) => JSON.parse(line))).toEqual([
+      expect.objectContaining({ fileId: first, state: 'completed' }),
+      expect.objectContaining({
+        fileId: second,
+        state: 'active',
+        phase: 'embedding',
+        stale: true,
+        progressUpdatedAt: '2026-11-01T08:00:00Z',
+      }),
+      expect.objectContaining({ fileId: third, state: 'unavailable' }),
+      expect.objectContaining({
+        accepted: 3,
+        completed: 1,
+        failed: 0,
+        pending: 1,
+        unavailable: 1,
+        untracked: 0,
+        submissionDone: true,
+      }),
+    ]);
+    expect(await readFile(checkpoint, 'utf8')).toBe(saved);
+  });
+
+  it('reports old submissions without job IDs and does not guess from the file state', async () => {
+    await writeFile(
+      checkpoint,
+      JSON.stringify({
+        version: 1,
+        api: 'http://127.0.0.1:3000',
+        target,
+        cursor: null,
+        pending: null,
+        accepted: 1,
+        skipped: 0,
+        done: true,
+      }),
+    );
+    await expect(
+      runRebuild(rebuildOptions(['--status', '--checkpoint', checkpoint]), {
+        fetcher,
+        report,
+      }),
+    ).resolves.toBe(1);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(JSON.parse(report.mock.calls[0][0])).toMatchObject({
+      accepted: 1,
+      completed: 0,
+      untracked: 1,
     });
   });
 });
