@@ -375,4 +375,50 @@ describe('ProcessingJobsService', () => {
       ServiceUnavailableException,
     );
   });
+
+  it('serves the last saved phase while Redis is unavailable, then returns live retry state', async () => {
+    const snapshot = {
+      fileId,
+      jobId,
+      state: 'active',
+      phase: 'embedding',
+      progressUpdatedAt: new Date('2026-11-15T03:00:00Z'),
+    };
+    history.findOne.mockResolvedValue(snapshot);
+    queue.getDeduplicationJobId.mockRejectedValueOnce(
+      new Error('Redis unavailable'),
+    );
+    await expect(
+      service.attachStatus({ id: fileId, indexJobId: jobId }),
+    ).resolves.toMatchObject({
+      processingJob: { jobId, state: 'unknown' },
+    });
+    queue.getJob.mockRejectedValueOnce(new Error('Redis unavailable'));
+    await expect(service.findOne(fileId, jobId)).resolves.toEqual({
+      ...snapshot,
+      stale: true,
+    });
+    queue.getJob.mockResolvedValue({
+      data: { fileId },
+      getState: vi.fn().mockResolvedValue('delayed'),
+      progress: { phase: 'embedding' },
+    });
+    await expect(service.findOne(fileId, jobId)).resolves.toMatchObject({
+      state: 'delayed',
+      error: null,
+    });
+  });
+
+  it('does not report an orphaned progress snapshot as a running job', async () => {
+    history.findOne.mockResolvedValue({ fileId, jobId, state: 'active' });
+    queue.getJob.mockResolvedValue(undefined);
+    await expect(service.findOne(fileId, jobId)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(
+      service.attachStatus({ id: fileId, indexJobId: jobId }),
+    ).resolves.toMatchObject({
+      processingJob: null,
+    });
+  });
 });

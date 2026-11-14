@@ -76,6 +76,8 @@ export interface ProcessingJob {
   state: string;
   attemptsMade: number;
   phase?: 'reading' | 'extracting' | 'embedding' | 'indexing' | null;
+  stale?: boolean;
+  progressUpdatedAt?: string | null;
   result: { chunkCount: number; model: string; dimensions: number } | null;
   error: string | null;
 }

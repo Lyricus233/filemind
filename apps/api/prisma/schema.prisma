@@ -20,6 +20,7 @@ enum IndexStatus {
 }
 
 enum ProcessingJobOutcome {
+  active
   completed
   failed
 }
@@ -49,16 +50,18 @@ model File {
 }
 
 model FileProcessingJob {
-  jobId        String               @id @db.Uuid
-  fileId       String               @db.Uuid
-  state        ProcessingJobOutcome
-  attemptsMade Int
-  phase        String?
-  result       Json?
-  error        String?
-  queuedAt     DateTime
-  finishedAt   DateTime
-  file         File                 @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  jobId             String               @id @db.Uuid
+  fileId            String               @db.Uuid
+  state             ProcessingJobOutcome
+  attemptsMade      Int
+  attemptsStarted   Int                  @default(0)
+  phase             String?
+  result            Json?
+  error             String?
+  queuedAt          DateTime
+  finishedAt        DateTime?
+  progressUpdatedAt DateTime?
+  file              File                 @relation(fields: [fileId], references: [id], onDelete: Cascade)
 
   @@index([fileId, finishedAt, jobId])
   @@map("file_processing_jobs")

@@ -151,6 +151,7 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
     file: T,
   ) {
     let jobId = file.indexJobId;
+    let queueUnavailable = false;
     try {
       jobId = (await this.queue.getDeduplicationJobId(file.id)) ?? jobId;
       const job = jobId ? await this.queue.getJob(jobId) : undefined;
@@ -160,14 +161,17 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
           return { ...file, processingJob: { jobId: job.id, state } };
       }
     } catch {
-      // The file library remains available when Redis cannot be reached.
+      queueUnavailable = true;
     }
-    const archived = jobId ? await this.history.findOne(file.id, jobId) : null;
+    const saved = jobId ? await this.history.findOne(file.id, jobId) : null;
     return {
       ...file,
-      processingJob: archived
-        ? { jobId: archived.jobId, state: archived.state }
-        : null,
+      processingJob:
+        saved && saved.state !== 'active'
+          ? { jobId: saved.jobId, state: saved.state }
+          : saved && queueUnavailable
+            ? { jobId: saved.jobId, state: 'unknown' as const }
+            : null,
     };
   }
 
@@ -205,9 +209,27 @@ export class ProcessingJobsService implements OnModuleInit, OnModuleDestroy {
   async findOne(fileId: string, jobId: string) {
     fileId = await this.findVisibleFileId(fileId);
     jobId = jobId.toLowerCase();
-    const archived = await this.history.findOne(fileId, jobId);
-    if (archived) return archived;
+    const saved = await this.history.findOne(fileId, jobId);
+    if (saved && saved.state !== 'active') return saved;
 
+    try {
+      return await this.readQueueStatus(fileId, jobId);
+    } catch (error) {
+      if (
+        error instanceof ServiceUnavailableException ||
+        error instanceof NotFoundException
+      ) {
+        const latest = await this.history.findOne(fileId, jobId);
+        if (latest && latest.state !== 'active') return latest;
+        if (latest && error instanceof ServiceUnavailableException) {
+          return { ...latest, stale: true };
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async readQueueStatus(fileId: string, jobId: string) {
     const initialJob = await this.withQueue(() => this.queue.getJob(jobId));
 
     if (initialJob === undefined || initialJob.data.fileId !== fileId) {

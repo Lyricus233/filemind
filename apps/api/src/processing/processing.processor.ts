@@ -35,7 +35,10 @@ export class ProcessingProcessor extends WorkerHost {
     try {
       if (!job.id) throw new UnrecoverableError('Processing job ID is missing');
       return await this.processingService.process(job.data.fileId, job.id, {
-        onProgress: (phase) => job.updateProgress({ phase }),
+        onProgress: async (phase) => {
+          await job.updateProgress({ phase });
+          await this.history.saveProgress(job, phase);
+        },
         extractChunks: extractChunksInWorker,
       });
     } catch (error) {

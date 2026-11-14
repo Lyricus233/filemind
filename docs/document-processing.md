@@ -51,7 +51,11 @@ The response contains `items`, `page`, `limit` and `hasMore`. Each item records
 the final state, last known phase, attempt count, queue and finish timestamps,
 and either the result or a failure message. The existing per-job status URL
 can serve archived results after Redis has expired the job. Queued and running
-jobs still report their live state through the status URL.
+jobs report their live state through the status URL. If Redis is unavailable
+after the worker starts, that URL can serve the last saved phase with
+`stale: true` and `progressUpdatedAt`. Poll again to recover live status.
+When Redis is reachable and no longer has the job, an unfinished snapshot does
+not count as a running job. The history list shows terminal jobs.
 
 The worker archives terminal events from the new version onward. Earlier Redis
 jobs follow their original retention policy. If the worker misses the terminal

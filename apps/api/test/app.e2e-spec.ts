@@ -1140,6 +1140,38 @@ describe('File retrieval pipeline (e2e)', () => {
             );
           }),
         ]);
+        const jobId = queued.body.jobId as string;
+        const saved = await prisma!.fileProcessingJob.findUnique({
+          where: { jobId },
+        });
+        expect(saved).toMatchObject({
+          fileId: file.id,
+          phase: 'embedding',
+          state: 'active',
+          finishedAt: null,
+          progressUpdatedAt: expect.any(Date),
+        });
+        const list = await request(app!.getHttpServer())
+          .get(`/files/${file.id}/processing-jobs`)
+          .expect(200);
+        expect(list.body.items).toEqual([]);
+        const getJob = vi
+          .spyOn(queue!, 'getJob')
+          .mockRejectedValueOnce(new Error('Redis unavailable'));
+        try {
+          const status = await request(app!.getHttpServer())
+            .get(queued.body.statusUrl as string)
+            .expect(200);
+          expect(status.body).toMatchObject({
+            jobId,
+            state: 'active',
+            phase: 'embedding',
+            stale: true,
+            progressUpdatedAt: expect.any(String),
+          });
+        } finally {
+          getJob.mockRestore();
+        }
         await request(app!.getHttpServer())
           .delete(`/files/${file.id}`)
           .expect(204);

@@ -107,7 +107,11 @@ function JobProgress({ job }: { job: ProcessingJob }) {
   return (
     <section className="wp-panel job-progress" aria-label="处理进度">
       <div className="wp-panel-head" role="status">
-        <h2>{jobLabels[job.state] ?? '等待任务状态'}</h2>
+        <h2>
+          {job.stale
+            ? '最近记录的进度'
+            : (jobLabels[job.state] ?? '等待任务状态')}
+        </h2>
         {job.attemptsMade > 0 && !finished && (
           <span className="wp-meta">已尝试 {job.attemptsMade} 次</span>
         )}
@@ -143,6 +147,17 @@ function JobProgress({ job }: { job: ProcessingJob }) {
           );
         })}
       </ol>
+      {job.stale && (
+        <p className="job-message">
+          暂时无法获取实时状态
+          {job.progressUpdatedAt && (
+            <>
+              {' '}
+              · <IndexTime value={job.progressUpdatedAt} />
+            </>
+          )}
+        </p>
+      )}
       {failed && job.error && (
         <p className="job-message" role="alert">
           {stalled
@@ -267,7 +282,11 @@ function FileRecordPage({ id }: { id: string }) {
                   </span>
                   <IndexBadge
                     status={file.data.indexStatus}
-                    jobState={job.data?.state ?? file.data.processingJob?.state}
+                    jobState={
+                      job.data?.stale
+                        ? undefined
+                        : (job.data?.state ?? file.data.processingJob?.state)
+                    }
                   />
                   <span>{fileSize(file.data.sizeBytes)}</span>
                   <span className="detail-date">
