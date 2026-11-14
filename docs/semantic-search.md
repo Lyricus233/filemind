@@ -153,6 +153,32 @@ Inspect the returned submission results and poll their `statusUrl` values. If
 reflects current database state as jobs complete. Start again without a cursor to
 check for files that failed or became eligible during the pass.
 
+### Resume bulk submission from the command line
+
+Build the API, then run these commands from `apps/api` while the API and worker
+are running. The first command previews one page. The second submits up to five
+pages and saves a checkpoint you can reuse with the same command.
+
+```powershell
+pnpm run files:rebuild-index
+pnpm run files:rebuild-index --apply --checkpoint ./rebuild-checkpoint.json
+```
+
+Use `--api <url>` for another API base URL or `--max-batches <n>` to change the
+number of pages per invocation. The checkpoint's API, collection, model and
+dimensions must match when resuming. Use a fresh checkpoint for a new pass.
+
+Each batch prints its job IDs and status URLs. `done: true` means submission
+has finished. Use the status URLs to track indexing itself. A missing file is
+counted as skipped. When the API reports a submission error or the response
+is lost, the remaining file IDs stay in the checkpoint's `pending` entry.
+Review those IDs and the jobs already created before adding `--retry-uncertain`.
+The queue deduplicates active jobs. Resubmitting a job that already finished can
+start another indexing run.
+
+If the CLI was forcibly stopped and its `.lock` file remains, check that no
+process is using this checkpoint before removing the lock and resuming.
+
 ## Test boundaries
 
 | Command                  | Dependencies and coverage                                              |

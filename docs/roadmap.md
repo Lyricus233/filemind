@@ -16,6 +16,7 @@ implemented features and remaining product capabilities.
 - PostgreSQL processing history and last known progress during Redis outages.
 - Bulk indexing by file ID with a submission result for each file.
 - Paginated rebuild candidates for the configured vector collection.
+- Resumable index rebuild submission CLI with preview and checkpoints.
 - Literal chunk search with match ranges and pagination.
 - Configurable remote embeddings through the OpenAI SDK; Qwen is the current model.
 - Milvus vector storage, cosine search, model/dimension checks and file filters.
@@ -28,7 +29,7 @@ implemented features and remaining product capabilities.
 
 ## Next backend milestones
 
-1. **File/index management:** resumable rebuild runs and orphan cleanup.
+1. **File/index management:** orphan cleanup and rebuild job reporting.
 2. **More document formats:** PPTX, spreadsheets and HTML as needed. Improve
    reading order, structural chunking and table/section locations.
    Add OCR for scanned documents.
