@@ -63,9 +63,8 @@ Cleanup runs in this order:
 If cleanup fails, the file stays hidden and its recovery metadata remains in
 PostgreSQL. Repeating `DELETE /files/:id` resumes cleanup; deleting already-removed
 vectors or content is safe. A missing collection is treated as already cleaned.
-The API returns a sanitized error and logs the underlying failure. There is no
-automatic background cleanup task yet, so an incomplete deletion needs another
-DELETE request. A 503 does not mean that earlier cleanup steps were rolled back.
+The API returns a sanitized error and logs the underlying failure. A 503 does
+not mean that earlier cleanup steps were rolled back.
 
 Concurrent DELETE requests can safely repeat the same cleanup. A worker that has
 already claimed the file for vector writes blocks deletion with 409. A queued job,
@@ -78,6 +77,24 @@ They are not synchronously removed by file deletion, and the public status endpo
 returns 404 once the file is hidden or gone. PostgreSQL processing history is
 hidden with the file and removed when the file row is deleted.
 
+## Resume pending deletions in batches
+
+Build the API and run the command from `apps/api` with the same PostgreSQL,
+storage and Milvus configuration as the API. Preview the first 20 records
+already marked for deletion, then apply if you want to finish their cleanup.
+
+```powershell
+pnpm run build
+pnpm run files:resume-deletions
+pnpm run files:resume-deletions --apply
+```
+
+Each invocation processes one page. Use `--limit` from 1 to 100 and pass the
+returned `nextCursor` to `--after` to continue to the next page. Each failed
+file remains marked for deletion. The command reports its ID, continues with
+the rest of the page and exits with code 1. Run again from the beginning to
+revisit failed records. Redis and the embedding provider are unnecessary.
+
 ## Collection history
 
 The `file_vector_indexes` table records each collection targeted by a processing
@@ -87,7 +104,7 @@ deletes only rows matching the file ID; shared collections remain available.
 
 The migration backfills each existing file's recorded `vectorCollection`. It cannot
 discover unrecorded orphan vectors left in other collections before history tracking
-was introduced. Orphan discovery and bulk cleanup remain future work.
+was introduced. The recovery command uses the tracked collections on each file.
 
 ## Verification
 

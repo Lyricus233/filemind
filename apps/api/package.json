@@ -9,6 +9,7 @@
   "scripts": {
     "build": "nest build",
     "files:hash-backfill": "node dist/files/backfill-hashes.js",
+    "files:resume-deletions": "node dist/files/resume-deletions.js",
     "files:rebuild-index": "node dist/processing/rebuild-index.js",
     "embeddings:check": "node dist/embeddings/check.js",
     "vectors:check": "node dist/vectors/check.js",

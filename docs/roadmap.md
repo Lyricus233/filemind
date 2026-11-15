@@ -24,12 +24,12 @@ implemented features and remaining product capabilities.
 - On-demand inspection of stored chunk vectors in the web workbench.
 - Pairwise cosine comparison of selected search results in the workbench and static demo.
 - Retryable file deletion across local storage, PostgreSQL and tracked Milvus
-  collections, with processing/deletion coordination.
+  collections, with processing/deletion coordination and batch recovery.
 - Unit, API, real Milvus and complete retrieval integration tests.
 
 ## Next backend milestones
 
-1. **File/index management:** orphan cleanup.
+1. **File/index management:** discover orphan vectors without tracked file records.
 2. **More document formats:** PPTX, spreadsheets and HTML as needed. Improve
    reading order, structural chunking and table/section locations.
    Add OCR for scanned documents.

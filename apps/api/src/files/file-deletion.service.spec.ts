@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { ProcessingJobsService } from '../processing/processing-jobs.service.js';
 import { StorageService } from '../storage/storage.service.js';
 import { VectorStoreService } from '../vectors/vector-store.service.js';
+import { FileCleanupService } from './file-cleanup.service.js';
 import { FileDeletionService } from './file-deletion.service.js';
 
 describe('FileDeletionService', () => {
@@ -24,12 +25,18 @@ describe('FileDeletionService', () => {
     ],
   };
   const prisma = {
-    file: { findUnique: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() },
+    file: {
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      updateMany: vi.fn(),
+      deleteMany: vi.fn(),
+    },
   };
   const storage = { remove: vi.fn() };
   const vectors = { deleteFromCollection: vi.fn() };
   const jobs = { releaseAbandoned: vi.fn() };
   let service: FileDeletionService;
+  let cleanup: FileCleanupService;
   let order: string[];
 
   beforeEach(() => {
@@ -49,10 +56,14 @@ describe('FileDeletionService', () => {
       order.push('vector');
     });
     jobs.releaseAbandoned.mockResolvedValue(undefined);
-    service = new FileDeletionService(
+    cleanup = new FileCleanupService(
       prisma as unknown as PrismaService,
       storage as unknown as StorageService,
       vectors as unknown as VectorStoreService,
+    );
+    service = new FileDeletionService(
+      prisma as unknown as PrismaService,
+      cleanup,
       jobs as unknown as ProcessingJobsService,
     );
   });
@@ -191,5 +202,72 @@ describe('FileDeletionService', () => {
       [file.id, 'old_index'],
       [file.id, 'current_index'],
     ]);
+  });
+
+  it('previews only marked rows and uses an ID cursor that does not depend on the previous row surviving', async () => {
+    const after = '00000000-0000-4000-8000-000000000001';
+    const marked = {
+      id: file.id,
+      originalName: 'deleted.txt',
+      deletedAt: new Date(),
+    };
+    prisma.file.findMany.mockResolvedValue([
+      marked,
+      { ...marked, id: '22222222-2222-4222-8222-222222222222' },
+    ]);
+    await expect(cleanup.listPending(1, after)).resolves.toEqual({
+      items: [marked],
+      nextCursor: file.id,
+    });
+    expect(prisma.file.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { gt: after }, deletedAt: { not: null } },
+        orderBy: { id: 'asc' },
+        take: 2,
+      }),
+    );
+    expect(vectors.deleteFromCollection).not.toHaveBeenCalled();
+    expect(storage.remove).not.toHaveBeenCalled();
+    expect(prisma.file.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('continues after a cleanup failure and rechecks the deletion marker before any writes', async () => {
+    const secondId = '22222222-2222-4222-8222-222222222222';
+    const goneId = '33333333-3333-4333-8333-333333333333';
+    vectors.deleteFromCollection.mockRejectedValueOnce(
+      new Error('Milvus unavailable'),
+    );
+    prisma.file.findUnique
+      .mockResolvedValueOnce(file)
+      .mockResolvedValueOnce({
+        ...file,
+        storageKey: 'next-file',
+        vectorCollection: null,
+        vectorIndexes: [],
+      })
+      .mockResolvedValueOnce(null);
+    await expect(
+      cleanup.resumePending([
+        { id: file.id },
+        { id: secondId },
+        { id: goneId },
+      ]),
+    ).resolves.toEqual({
+      completed: [secondId, goneId],
+      failed: [file.id],
+    });
+    expect(
+      prisma.file.findUnique.mock.calls.map(([query]) => query.where),
+    ).toEqual(
+      [file.id, secondId, goneId].map((id) => ({
+        id,
+        deletedAt: { not: null },
+      })),
+    );
+    expect(prisma.file.updateMany).not.toHaveBeenCalled();
+    expect(storage.remove).toHaveBeenCalledExactlyOnceWith('next-file');
+    expect(prisma.file.deleteMany).toHaveBeenCalledExactlyOnceWith({
+      where: { id: secondId, deletedAt: { not: null } },
+    });
   });
 });

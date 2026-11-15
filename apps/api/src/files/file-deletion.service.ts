@@ -1,24 +1,15 @@
-import {
-  ConflictException,
-  Injectable,
-  Logger,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 
 import { IndexStatus } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ProcessingJobsService } from '../processing/processing-jobs.service.js';
-import { StorageService } from '../storage/storage.service.js';
-import { VectorStoreService } from '../vectors/vector-store.service.js';
+import { FileCleanupService } from './file-cleanup.service.js';
 
 @Injectable()
 export class FileDeletionService {
-  private readonly logger = new Logger(FileDeletionService.name);
-
   constructor(
     private readonly prisma: PrismaService,
-    private readonly storage: StorageService,
-    private readonly vectors: VectorStoreService,
+    private readonly cleanup: FileCleanupService,
     private readonly jobs: ProcessingJobsService,
   ) {}
 
@@ -62,34 +53,6 @@ export class FileDeletionService {
       }
     }
 
-    try {
-      const cleanup = await this.prisma.file.findUnique({
-        where: { id },
-        select: {
-          storageKey: true,
-          vectorCollection: true,
-          vectorIndexes: { select: { collection: true } },
-        },
-      });
-      if (!cleanup) return;
-      const collections = new Set(
-        cleanup.vectorIndexes.map((index) => index.collection),
-      );
-      if (cleanup.vectorCollection) collections.add(cleanup.vectorCollection);
-      for (const collection of collections)
-        await this.vectors.deleteFromCollection(id, collection);
-      if (cleanup.storageKey) await this.storage.remove(cleanup.storageKey);
-      await this.prisma.file.deleteMany({
-        where: { id, deletedAt: { not: null } },
-      });
-    } catch (error) {
-      this.logger.error(
-        `File deletion failed for ${id}`,
-        error instanceof Error ? error.stack : String(error),
-      );
-      throw new ServiceUnavailableException(
-        'File deletion is incomplete; retry this DELETE request',
-      );
-    }
+    await this.cleanup.removePending(id);
   }
 }
