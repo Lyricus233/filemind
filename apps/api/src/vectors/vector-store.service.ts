@@ -23,6 +23,7 @@ export interface VectorMatch {
   score: number;
 }
 
+export const MAX_VECTOR_AUDIT_PAGE_SIZE = 1000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const WRITE_BATCH_SIZE = 128;
 
@@ -221,41 +222,10 @@ export class VectorStoreService implements OnModuleDestroy {
     this.validateId(chunkId);
     this.validateId(fileId);
     return this.withExistingCollection(collection, async (client) => {
-      const described = await client.describeCollection({
-        collection_name: collection,
-        cache: false,
-      });
-      assertMilvusSuccess(described.status);
-      const metadata = parseCollectionDescription(described.schema.description);
-      const field = described.schema.fields.find(
-        ({ name }) => name === 'embedding',
+      const { model, dimensions } = await this.describeStoredIndex(
+        client,
+        collection,
       );
-      const dimensions = Number(
-        field?.type_params.find(({ key }) => key === 'dim')?.value,
-      );
-      if (
-        !metadata ||
-        typeof metadata !== 'object' ||
-        !('application' in metadata) ||
-        metadata.application !== 'filemind' ||
-        !('schemaVersion' in metadata) ||
-        metadata.schemaVersion !== 1 ||
-        !('model' in metadata) ||
-        typeof metadata.model !== 'string' ||
-        !metadata.model.trim() ||
-        !('dimensions' in metadata) ||
-        metadata.dimensions !== dimensions ||
-        !Number.isInteger(dimensions) ||
-        dimensions < 2 ||
-        dimensions > 32768 ||
-        field?.data_type !== 'FloatVector' ||
-        described.consistency_level !== 'Strong'
-      ) {
-        throw new VectorStoreError(
-          'Milvus collection does not describe a FileMind vector index',
-          'schema_mismatch',
-        );
-      }
 
       const result = await client.get({
         collection_name: collection,
@@ -284,8 +254,133 @@ export class VectorStoreService implements OnModuleDestroy {
           'invalid_response',
         );
       }
-      return { collection, model: metadata.model, dimensions, vector };
+      return { collection, model, dimensions, vector };
     });
+  }
+
+  async listChunkReferences(collection: string, limit: number, after?: string) {
+    if (
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > MAX_VECTOR_AUDIT_PAGE_SIZE
+    )
+      throw new VectorStoreError(
+        `Vector audit limit must be between 1 and ${MAX_VECTOR_AUDIT_PAGE_SIZE}`,
+        'invalid_input',
+      );
+    if (after !== undefined) this.validateId(after);
+
+    const page = await this.withExistingCollection(
+      collection,
+      async (client) => {
+        const { fields } = await this.describeStoredIndex(client, collection);
+        if (
+          !fields.some(
+            (field) =>
+              field.name === 'chunk_id' &&
+              field.is_primary_key &&
+              field.data_type === 'VarChar',
+          ) ||
+          !fields.some(
+            (field) =>
+              field.name === 'file_id' &&
+              field.data_type === 'VarChar' &&
+              !field.nullable,
+          )
+        ) {
+          throw new VectorStoreError(
+            'Milvus collection does not have FileMind chunk references',
+            'schema_mismatch',
+          );
+        }
+        const result = await client.query({
+          collection_name: collection,
+          filter: after ? `chunk_id > ${JSON.stringify(after)}` : '',
+          output_fields: ['chunk_id', 'file_id'],
+          order_by_fields: 'chunk_id:asc',
+          limit: limit + 1,
+        });
+        assertMilvusSuccess(result.status);
+        if (result.data.length > limit + 1)
+          throw new VectorStoreError(
+            'Milvus exceeded the audit page limit',
+            'invalid_response',
+          );
+
+        let previous = after ?? '';
+        const rows = result.data.map(
+          ({ chunk_id: chunkId, file_id: fileId }) => {
+            if (
+              typeof chunkId !== 'string' ||
+              !UUID.test(chunkId) ||
+              chunkId <= previous ||
+              typeof fileId !== 'string' ||
+              !UUID.test(fileId)
+            ) {
+              throw new VectorStoreError(
+                'Milvus returned an invalid or unordered chunk reference',
+                'invalid_response',
+              );
+            }
+            previous = chunkId;
+            return { chunkId, fileId };
+          },
+        );
+        return {
+          items: rows.slice(0, limit),
+          nextCursor: rows.length > limit ? rows[limit - 1].chunkId : null,
+        };
+      },
+    );
+    if (!page)
+      throw new VectorStoreError(
+        'Milvus collection was not found',
+        'invalid_input',
+      );
+    return page;
+  }
+
+  private async describeStoredIndex(client: MilvusClient, collection: string) {
+    const described = await client.describeCollection({
+      collection_name: collection,
+      cache: false,
+    });
+    assertMilvusSuccess(described.status);
+    const metadata = parseCollectionDescription(described.schema.description);
+    const field = described.schema.fields.find(
+      ({ name }) => name === 'embedding',
+    );
+    const dimensions = Number(
+      field?.type_params.find(({ key }) => key === 'dim')?.value,
+    );
+    if (
+      !metadata ||
+      typeof metadata !== 'object' ||
+      !('application' in metadata) ||
+      metadata.application !== 'filemind' ||
+      !('schemaVersion' in metadata) ||
+      metadata.schemaVersion !== 1 ||
+      !('model' in metadata) ||
+      typeof metadata.model !== 'string' ||
+      !metadata.model.trim() ||
+      !('dimensions' in metadata) ||
+      metadata.dimensions !== dimensions ||
+      !Number.isInteger(dimensions) ||
+      dimensions < 2 ||
+      dimensions > 32768 ||
+      field?.data_type !== 'FloatVector' ||
+      described.consistency_level !== 'Strong'
+    ) {
+      throw new VectorStoreError(
+        'Milvus collection does not describe a FileMind vector index',
+        'schema_mismatch',
+      );
+    }
+    return {
+      model: metadata.model,
+      dimensions,
+      fields: described.schema.fields,
+    };
   }
 
   private async withExistingCollection<T>(

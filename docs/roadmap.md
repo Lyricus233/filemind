@@ -20,6 +20,7 @@ implemented features and remaining product capabilities.
 - Literal chunk search with match ranges and pagination.
 - Configurable remote embeddings through the OpenAI SDK; Qwen is the current model.
 - Milvus vector storage, cosine search, model/dimension checks and file filters.
+- Read-only audit of missing file references and untracked vector collections.
 - Text indexing lifecycle and semantic search returning original source passages.
 - On-demand inspection of stored chunk vectors in the web workbench.
 - Pairwise cosine comparison of selected search results in the workbench and static demo.
@@ -29,7 +30,7 @@ implemented features and remaining product capabilities.
 
 ## Next backend milestones
 
-1. **File/index management:** discover orphan vectors without tracked file records.
+1. **File/index management:** targeted cleanup of confirmed orphan vectors.
 2. **More document formats:** PPTX, spreadsheets and HTML as needed. Improve
    reading order, structural chunking and table/section locations.
    Add OCR for scanned documents.

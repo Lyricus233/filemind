@@ -105,6 +105,8 @@ deletes only rows matching the file ID; shared collections remain available.
 The migration backfills each existing file's recorded `vectorCollection`. It cannot
 discover unrecorded orphan vectors left in other collections before history tracking
 was introduced. The recovery command uses the tracked collections on each file.
+Use the [vector audit](vector-store.md#audit-file-references) to inspect missing
+file references and untracked collections before deciding what to keep.
 
 ## Verification
 

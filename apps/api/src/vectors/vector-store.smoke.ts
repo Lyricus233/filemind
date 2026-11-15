@@ -66,6 +66,19 @@ export async function checkVectorStore(config: ConfigService) {
     assert.equal(filtered[0].chunkId, secondChunk);
 
     const reader = new VectorStoreService(config);
+    const references = [
+      { chunkId: firstChunk, fileId: firstFile },
+      { chunkId: secondChunk, fileId: secondFile },
+    ].sort((left, right) => (left.chunkId < right.chunkId ? -1 : 1));
+    const firstPage = await reader.listChunkReferences(collection, 1);
+    assert.deepEqual(firstPage, {
+      items: [references[0]],
+      nextCursor: references[0].chunkId,
+    });
+    assert.deepEqual(
+      await reader.listChunkReferences(collection, 1, references[0].chunkId),
+      { items: [references[1]], nextCursor: null },
+    );
     assert.deepEqual(await reader.readStoredChunk({ ...first, collection }), {
       collection,
       model: 'filemind-vector-check',

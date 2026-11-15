@@ -88,6 +88,28 @@ The integration test defaults to `127.0.0.1:19530`. Override
 No PostgreSQL, Redis, remote embedding service or `.env.test` is required for this
 test. `pnpm test` runs unit tests without connecting to Milvus.
 
+## Audit file references
+
+Run a read-only check of a specific FileMind collection from `apps/api` using
+the matching PostgreSQL and Milvus configuration.
+
+```powershell
+pnpm run build
+pnpm run vectors:audit --collection filemind_chunks_v1
+```
+
+Each invocation scans up to 200 chunk references. Use `--limit` to change the
+page size from 1 to 1000. Pass `nextCursor` to `--after` until it returns
+`null`. A page with no findings can still have a next page.
+
+- `missing_file` means the vector references a UUID without a PostgreSQL file row.
+- `untracked_collection` means the file exists but neither its current collection
+  nor its tracked collection history includes this collection.
+
+The report checks file references. It reads no vector coefficients and calls no
+embedding API. Run while indexing and deletion are idle when reviewing findings
+across pages. Vectors are left untouched.
+
 ## Storage contract
 
 | Field         | Type                     | Purpose                              |

@@ -13,6 +13,7 @@
     "files:rebuild-index": "node dist/processing/rebuild-index.js",
     "embeddings:check": "node dist/embeddings/check.js",
     "vectors:check": "node dist/vectors/check.js",
+    "vectors:audit": "node dist/vectors/audit.js",
     "deploy": "nest deploy",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",

@@ -16,6 +16,7 @@ const sdk = vi.hoisted(() => ({
     loadCollection: vi.fn(),
     upsert: vi.fn(),
     search: vi.fn(),
+    query: vi.fn(),
     delete: vi.fn(),
     closeConnection: vi.fn(),
   },
@@ -121,6 +122,61 @@ describe('VectorStoreService', () => {
     const instance = new VectorStoreService(new ConfigService());
     await instance.onModuleDestroy();
     expect(sdk.construct).not.toHaveBeenCalled();
+  });
+
+  it('pages stored chunk references without loading embeddings or requiring the active model', async () => {
+    const after = '00000000-0000-4000-8000-000000000001';
+    const next = '33333333-3333-4333-8333-333333333333';
+    sdk.client.hasCollection.mockResolvedValue({
+      status: success,
+      value: true,
+    });
+    sdk.client.query.mockResolvedValue({
+      status: success,
+      data: [
+        { chunk_id: chunkId, file_id: fileId },
+        { chunk_id: next, file_id: fileId },
+      ],
+    });
+    const instance = new VectorStoreService(
+      new ConfigService({ EMBEDDING_MODEL: '' }),
+    );
+    instances.push(instance);
+
+    await expect(
+      instance.listChunkReferences('old_index', 1, after),
+    ).resolves.toEqual({
+      items: [{ chunkId, fileId }],
+      nextCursor: chunkId,
+    });
+    expect(sdk.client.query).toHaveBeenCalledWith({
+      collection_name: 'old_index',
+      filter: `chunk_id > "${after}"`,
+      output_fields: ['chunk_id', 'file_id'],
+      order_by_fields: 'chunk_id:asc',
+      limit: 2,
+    });
+    expect(sdk.client.createCollection).not.toHaveBeenCalled();
+    expect(sdk.client.createIndex).not.toHaveBeenCalled();
+  });
+
+  it('rejects unordered rows instead of returning a cursor that could skip chunks', async () => {
+    sdk.client.hasCollection.mockResolvedValue({
+      status: success,
+      value: true,
+    });
+    sdk.client.query.mockResolvedValue({
+      status: success,
+      data: [
+        { chunk_id: chunkId, file_id: fileId },
+        { chunk_id: fileId, file_id: fileId },
+      ],
+    });
+    await expect(
+      service().listChunkReferences('old_index', 2),
+    ).rejects.toMatchObject({
+      code: 'invalid_response',
+    });
   });
 
   it('creates a UUID-based schema with a cosine index and shares initialization', async () => {
