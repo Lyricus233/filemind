@@ -17,6 +17,7 @@ const sdk = vi.hoisted(() => ({
     upsert: vi.fn(),
     search: vi.fn(),
     query: vi.fn(),
+    get: vi.fn(),
     delete: vi.fn(),
     closeConnection: vi.fn(),
   },
@@ -177,6 +178,58 @@ describe('VectorStoreService', () => {
     ).rejects.toMatchObject({
       code: 'invalid_response',
     });
+  });
+
+  it('reads the current chunk owner without fetching embedding coefficients', async () => {
+    sdk.client.hasCollection.mockResolvedValue({
+      status: success,
+      value: true,
+    });
+    sdk.client.get.mockResolvedValue({
+      status: success,
+      data: [{ chunk_id: chunkId, file_id: fileId }],
+    });
+    await expect(
+      service().findChunkReference('old_index', chunkId),
+    ).resolves.toEqual({ chunkId, fileId });
+    expect(sdk.client.get).toHaveBeenCalledExactlyOnceWith({
+      collection_name: 'old_index',
+      ids: [chunkId],
+      output_fields: ['chunk_id', 'file_id'],
+    });
+  });
+
+  it('uses both audited IDs in the delete filter and reports when no row matched', async () => {
+    sdk.client.hasCollection.mockResolvedValue({
+      status: success,
+      value: true,
+    });
+    sdk.client.delete.mockResolvedValue({ status: success, delete_cnt: '0' });
+    await expect(
+      service().deleteChunkReference('old_index', { chunkId, fileId }),
+    ).resolves.toBe(false);
+    expect(sdk.client.delete).toHaveBeenCalledExactlyOnceWith({
+      collection_name: 'old_index',
+      filter: `chunk_id == "${chunkId}" && file_id == "${fileId}"`,
+    });
+  });
+
+  it('requires the chunk reference schema before deleting', async () => {
+    sdk.client.hasCollection.mockResolvedValue({
+      status: success,
+      value: true,
+    });
+    const invalid = description();
+    invalid.schema.fields = invalid.schema.fields.filter(
+      ({ name }) => name !== 'file_id',
+    );
+    sdk.client.describeCollection.mockResolvedValue(invalid);
+    await expect(
+      service().deleteChunkReference('old_index', { chunkId, fileId }),
+    ).rejects.toMatchObject({
+      code: 'schema_mismatch',
+    });
+    expect(sdk.client.delete).not.toHaveBeenCalled();
   });
 
   it('creates a UUID-based schema with a cosine index and shares initialization', async () => {

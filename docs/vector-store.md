@@ -110,6 +110,24 @@ The report checks file references. It reads no vector coefficients and calls no
 embedding API. Run while indexing and deletion are idle when reviewing findings
 across pages. Vectors are left untouched.
 
+## Remove one confirmed orphan
+
+Copy the collection and both IDs from a `missing_file` finding. Use the
+PostgreSQL database paired with that collection and run while database restores
+or imports that reuse UUIDs are idle.
+
+```powershell
+pnpm run vectors:prune-orphan --collection filemind_chunks_v1 --chunk-id $chunkId --file-id $fileId
+pnpm run vectors:prune-orphan --collection filemind_chunks_v1 --chunk-id $chunkId --file-id $fileId --apply
+```
+
+The preview reports `orphaned` when the stored IDs match and PostgreSQL has
+neither the file nor the chunk. Apply repeats these checks and deletes only the
+matching chunk/file pair. An existing file row, even one marked for deletion, or
+an existing chunk row protects the vector. A vector with a different file ID is
+reported as `reference_changed`. Repeating a successful cleanup reports
+`missing_vector`.
+
 ## Storage contract
 
 | Field         | Type                     | Purpose                              |

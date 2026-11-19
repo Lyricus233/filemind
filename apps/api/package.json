@@ -14,6 +14,7 @@
     "embeddings:check": "node dist/embeddings/check.js",
     "vectors:check": "node dist/vectors/check.js",
     "vectors:audit": "node dist/vectors/audit.js",
+    "vectors:prune-orphan": "node dist/vectors/audit.js prune",
     "deploy": "nest deploy",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",

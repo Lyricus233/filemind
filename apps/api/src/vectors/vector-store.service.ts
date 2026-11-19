@@ -9,9 +9,12 @@ import {
   vectorStoreConfig,
 } from './vector-store.config.js';
 
-export interface ChunkVector {
+export interface ChunkReference {
   chunkId: string;
   fileId: string;
+}
+
+export interface ChunkVector extends ChunkReference {
   index: number;
   vector: readonly number[];
 }
@@ -273,26 +276,7 @@ export class VectorStoreService implements OnModuleDestroy {
     const page = await this.withExistingCollection(
       collection,
       async (client) => {
-        const { fields } = await this.describeStoredIndex(client, collection);
-        if (
-          !fields.some(
-            (field) =>
-              field.name === 'chunk_id' &&
-              field.is_primary_key &&
-              field.data_type === 'VarChar',
-          ) ||
-          !fields.some(
-            (field) =>
-              field.name === 'file_id' &&
-              field.data_type === 'VarChar' &&
-              !field.nullable,
-          )
-        ) {
-          throw new VectorStoreError(
-            'Milvus collection does not have FileMind chunk references',
-            'schema_mismatch',
-          );
-        }
+        await this.validateChunkReferenceFields(client, collection);
         const result = await client.query({
           collection_name: collection,
           filter: after ? `chunk_id > ${JSON.stringify(after)}` : '',
@@ -338,6 +322,86 @@ export class VectorStoreService implements OnModuleDestroy {
         'invalid_input',
       );
     return page;
+  }
+
+  async findChunkReference(collection: string, chunkId: string) {
+    this.validateId(chunkId);
+    return this.withExistingCollection(collection, async (client) => {
+      await this.validateChunkReferenceFields(client, collection);
+      const result = await client.get({
+        collection_name: collection,
+        ids: [chunkId],
+        output_fields: ['chunk_id', 'file_id'],
+      });
+      assertMilvusSuccess(result.status);
+      if (!result.data.length) return null;
+      const { chunk_id: storedId, file_id: fileId } = result.data[0];
+      if (
+        result.data.length !== 1 ||
+        storedId !== chunkId ||
+        typeof fileId !== 'string' ||
+        !UUID.test(fileId)
+      ) {
+        throw new VectorStoreError(
+          'Milvus returned an invalid chunk reference',
+          'invalid_response',
+        );
+      }
+      return { chunkId, fileId };
+    });
+  }
+
+  async deleteChunkReference(
+    collection: string,
+    { chunkId, fileId }: ChunkReference,
+  ) {
+    this.validateId(chunkId);
+    this.validateId(fileId);
+    const deleted = await this.withExistingCollection(
+      collection,
+      async (client) => {
+        await this.validateChunkReferenceFields(client, collection);
+        const result = await client.delete({
+          collection_name: collection,
+          filter: `chunk_id == ${JSON.stringify(chunkId)} && file_id == ${JSON.stringify(fileId)}`,
+        });
+        assertMilvusSuccess(result.status);
+        if (result.delete_cnt !== '0' && result.delete_cnt !== '1') {
+          throw new VectorStoreError(
+            'Milvus returned an unexpected chunk deletion count',
+            'invalid_response',
+          );
+        }
+        return result.delete_cnt === '1';
+      },
+    );
+    return deleted ?? false;
+  }
+
+  private async validateChunkReferenceFields(
+    client: MilvusClient,
+    collection: string,
+  ) {
+    const { fields } = await this.describeStoredIndex(client, collection);
+    if (
+      !fields.some(
+        (field) =>
+          field.name === 'chunk_id' &&
+          field.is_primary_key &&
+          field.data_type === 'VarChar',
+      ) ||
+      !fields.some(
+        (field) =>
+          field.name === 'file_id' &&
+          field.data_type === 'VarChar' &&
+          !field.nullable,
+      )
+    ) {
+      throw new VectorStoreError(
+        'Milvus collection does not have FileMind chunk references',
+        'schema_mismatch',
+      );
+    }
   }
 
   private async describeStoredIndex(client: MilvusClient, collection: string) {

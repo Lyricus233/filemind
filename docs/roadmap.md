@@ -21,6 +21,7 @@ implemented features and remaining product capabilities.
 - Configurable remote embeddings through the OpenAI SDK; Qwen is the current model.
 - Milvus vector storage, cosine search, model/dimension checks and file filters.
 - Read-only audit of missing file references and untracked vector collections.
+- Targeted cleanup for confirmed orphan vectors.
 - Text indexing lifecycle and semantic search returning original source passages.
 - On-demand inspection of stored chunk vectors in the web workbench.
 - Pairwise cosine comparison of selected search results in the workbench and static demo.
@@ -30,15 +31,14 @@ implemented features and remaining product capabilities.
 
 ## Next backend milestones
 
-1. **File/index management:** targeted cleanup of confirmed orphan vectors.
-2. **More document formats:** PPTX, spreadsheets and HTML as needed. Improve
+1. **More document formats:** PPTX, spreadsheets and HTML as needed. Improve
    reading order, structural chunking and table/section locations.
    Add OCR for scanned documents.
-3. **Hybrid retrieval:** BM25 and Chinese tokenization, dense/sparse fusion with RRF,
+2. **Hybrid retrieval:** BM25 and Chinese tokenization, dense/sparse fusion with RRF,
    filename/title retrieval and reranking. Keep relevance evaluation alongside tuning.
-4. **Access and API operations:** authentication, ownership/permissions, quotas and
+3. **Access and API operations:** authentication, ownership/permissions, quotas and
    rate limits, API documentation and consistent error handling.
-5. **Deployment and recovery:** API/worker images, environment validation, readiness,
+4. **Deployment and recovery:** API/worker images, environment validation, readiness,
    logs/metrics, backup/restore and an object-storage adapter for original files.
    Milvus's internal MinIO is not yet the original-file storage adapter.
 

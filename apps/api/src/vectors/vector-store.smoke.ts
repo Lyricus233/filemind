@@ -102,6 +102,30 @@ export async function checkVectorStore(config: ConfigService) {
     assert.equal(retained[0].chunkId, secondChunk);
     // An absent file is safe to delete repeatedly.
     await store.deleteByFile(firstFile);
+    const secondReference = { chunkId: secondChunk, fileId: secondFile };
+    assert.deepEqual(
+      await reader.findChunkReference(collection, secondChunk),
+      secondReference,
+    );
+    assert.equal(
+      await reader.deleteChunkReference(collection, {
+        chunkId: secondChunk,
+        fileId: firstFile,
+      }),
+      false,
+    );
+    assert.deepEqual(
+      await reader.findChunkReference(collection, secondChunk),
+      secondReference,
+    );
+    assert.equal(
+      await reader.deleteChunkReference(collection, secondReference),
+      true,
+    );
+    assert.equal(
+      await reader.findChunkReference(collection, secondChunk),
+      null,
+    );
   } finally {
     try {
       await store.onModuleDestroy();
